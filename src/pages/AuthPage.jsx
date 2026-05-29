@@ -1,0 +1,111 @@
+import React, { useState } from 'react';
+import { DEMO_USER } from '../data/placeholder';
+
+export default function AuthPage({ onLogin }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    await new Promise(r => setTimeout(r, 700));
+    if (username === DEMO_USER.username && password === DEMO_USER.password) {
+      onLogin(DEMO_USER);
+    } else {
+      setError('Invalid username or password.');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #fde8e4 0%, #f4f4f5 60%, #e0e7ff 100%)',
+      padding: 20,
+    }}>
+      <div style={{ width: '100%', maxWidth: 380 }}>
+        {/* Logo card */}
+        <div style={{
+          background: '#fff', borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
+        }}>
+          {/* Header band */}
+          <div style={{
+            background: 'var(--primary)', padding: '28px 32px 24px',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 16,
+              background: 'rgba(255,255,255,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 30, marginBottom: 12,
+            }}>🍗</div>
+            <div style={{ color: '#fff', fontWeight: 700, fontSize: 20, textAlign: 'center', lineHeight: 1.2 }}>
+              Along Fried Chicken
+            </div>
+            <div style={{ color: 'rgba(255,255,255,.7)', fontSize: 12, marginTop: 4 }}>Management Console Login</div>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ padding: '28px 32px 32px' }}>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 5 }}>
+                Username
+              </label>
+              <input
+                className="inp"
+                type="text"
+                placeholder="Enter username"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 5 }}>
+                Password
+              </label>
+              <input
+                className="inp"
+                type="password"
+                placeholder="Enter password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+            </div>
+
+            {error && (
+              <div style={{
+                background: '#fef2f2', border: '1px solid #fecaca',
+                borderRadius: 'var(--radius-sm)', padding: '9px 12px',
+                fontSize: 13, color: '#dc2626', marginBottom: 14,
+              }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading}
+              style={{ width: '100%', justifyContent: 'center', padding: '11px', fontSize: 14, opacity: loading ? .7 : 1 }}
+            >
+              {loading ? 'Signing in…' : 'Sign In'}
+            </button>
+
+            <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'var(--text-3)' }}>
+              Demo: <strong>admin</strong> / <strong>admin123</strong>
+            </div>
+          </form>
+        </div>
+
+        <div style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--text-3)' }}>
+          © 2025 AFC Management System · v1.0
+        </div>
+      </div>
+    </div>
+  );
+}
