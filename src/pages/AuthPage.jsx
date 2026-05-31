@@ -37,14 +37,8 @@ export default function AuthPage({ onLogin }) {
             background: 'var(--primary)', padding: '28px 32px 24px',
             display: 'flex', flexDirection: 'column', alignItems: 'center',
           }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: 16,
-              background: 'rgba(255,255,255,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 30, marginBottom: 12,
-            }}>🍗</div>
             <div style={{ color: '#fff', fontWeight: 700, fontSize: 20, textAlign: 'center', lineHeight: 1.2 }}>
-              Along Fried Chicken
+              Alang Fried Chicken
             </div>
             <div style={{ color: 'rgba(255,255,255,.7)', fontSize: 12, marginTop: 4 }}>Management Console Login</div>
           </div>
@@ -96,14 +90,11 @@ export default function AuthPage({ onLogin }) {
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
 
-            <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'var(--text-3)' }}>
-              Demo: <strong>admin</strong> / <strong>admin123</strong>
-            </div>
           </form>
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--text-3)' }}>
-          © 2025 AFC Management System · v1.0
+           2026 AFC Business App 
         </div>
       </div>
     </div>
