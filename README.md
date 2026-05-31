@@ -1,0 +1,9 @@
+TO START DEVELOPMENT (CMD)
+1. CLONE THE REPO FIRST, OPEN UP THE FILE PATH THAT YOU WANT TO PLACE THE FILE
+  cd [YOUR_FILE_PATH]
+3. RUN THE CLONE COMMAND
+   git clone -b development https://github.com/renshun00/AFC-app.git
+4. OPEN UP TERMINAL IN THE FOLDER THE FILE IS IN
+   -npm install
+5. TO RUN TEST LOCALLY
+   -npm run dev
