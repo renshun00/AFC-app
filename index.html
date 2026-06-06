@@ -4,29 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- PWA primary meta -->
-    <meta name="application-name" content="AFC Management" />
+    <!-- PWA manifest -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Theme -->
     <meta name="theme-color" content="#e8624a" />
-    <meta name="background-color" content="#f4f4f5" />
+    <meta name="application-name" content="AFC Management" />
     <meta name="description" content="Along Fried Chicken – Operations Management System" />
 
-    <!-- Apple PWA meta -->
+    <!-- Apple PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="AFC Mgmt" />
-    <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.svg" />
-    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
 
-    <!-- Microsoft/Windows meta -->
+    <!-- Microsoft -->
     <meta name="msapplication-TileColor" content="#e8624a" />
-    <meta name="msapplication-TileImage" content="/icons/icon-144x144.svg" />
-    <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
 
     <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-
-    <!-- Web App Manifest (injected by vite-plugin-pwa) -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
 
     <title>AFC Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -36,5 +36,28 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Register Service Worker -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(function (reg) {
+              console.log('[AFC PWA] SW registered:', reg.scope);
+              reg.addEventListener('updatefound', function () {
+                var nw = reg.installing;
+                nw.addEventListener('statechange', function () {
+                  if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                    window.dispatchEvent(new Event('pwa-update-available'));
+                  }
+                });
+              });
+            })
+            .catch(function (err) {
+              console.warn('[AFC PWA] SW registration failed:', err);
+            });
+        });
+      }
+    </script>
   </body>
 </html>

@@ -39,7 +39,7 @@ export default function App() {
       case 'daily':      return <DailyReportPage {...props} />;
       case 'reports':    return <ReportsPage {...props} />;
       default:           return <DashboardPage {...props} />;
-    }
+    } 
   };
 
   return (

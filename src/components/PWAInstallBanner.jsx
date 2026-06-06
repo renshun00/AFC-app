@@ -62,13 +62,15 @@ export default function PWAInstallBanner() {
           display: 'flex', alignItems: 'flex-start', gap: 14,
         }}>
           {/* App icon */}
-          <div style={{
-            width: 52, height: 52, borderRadius: 14, background: '#e8624a',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 26, flexShrink: 0,
-          }}>
-            🍗
-          </div>
+          <img
+            src="/afc_logo.jpg"
+            alt="AFC"
+            style={{
+              width: 52, height: 52, borderRadius: 14,
+              objectFit: 'cover', flexShrink: 0,
+              border: '2px solid #f0f0f0',
+            }}
+          />
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>
@@ -133,7 +135,7 @@ export default function PWAInstallBanner() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 28 }}>🍗</span>
+              <img src="/afc_logo.jpg" alt="AFC" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover', border: '1.5px solid #f0f0f0' }}/>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>Install AFC Management</div>
                 <div style={{ fontSize: 11, color: '#71717a' }}>Add to your iPhone home screen</div>

@@ -58,12 +58,6 @@ export default function StaffPayrollPage({ isMobile }) {
         ))}
       </div>
 
-      {/* Wage formula info box */}
-      <div style={{ background:'var(--indigo-light)',borderRadius:'var(--radius)',border:'1px solid #dde4ff',padding:'12px 16px',marginBottom:14,fontSize:13 }}>
-        <strong>📐 Wage Formula:</strong> Each task has a fixed rate per unit (shift/hour/run/session) + individual bonus.
-        <span style={{ color:'var(--text-2)' }}> Total = Σ(task_rate × qty) + bonus_amount</span>
-      </div>
-
       {/* Toolbar */}
       <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12 }}>
         <div style={{ fontSize:14,fontWeight:600 }}>Staff Roster — {new Date().toLocaleDateString('en-MY',{dateStyle:'medium'})}</div>

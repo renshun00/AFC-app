@@ -12,7 +12,6 @@ const NAV = [
   { key: 'inventory',  label: 'Inventory',        icon: Package },
   { key: 'menu',       label: 'Menu Engineering', icon: Wrench },
   { key: 'staff',      label: 'Staff & Payroll',  icon: Users },
-  { key: 'daily',      label: 'Daily Report',     icon: ClipboardList },
   { key: 'reports',    label: 'Reports',          icon: BarChart2 },
 ];
 
@@ -35,10 +34,22 @@ export function Sidebar({ page, setPage, open, onClose, isMobile }) {
         boxShadow: isMobile && open ? '4px 0 24px rgba(0,0,0,.14)' : 'none',
       }}>
         {/* Brand */}
-        <div style={{ padding:'0 20px 24px', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-          <div>
-            <div style={{ fontWeight:700, fontSize:18, lineHeight:1.2, color:'var(--text-1)' }}>AFC<br/>Management</div>
-            <div style={{ fontSize:11, color:'var(--text-3)', marginTop:5 }}>Active Session: Admin</div>
+        <div style={{ padding:'0 16px 20px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <img
+              src="/afc_logo.jpg"
+              alt="AFC"
+              style={{
+                width: 42, height: 42, borderRadius: '50%',
+                objectFit: 'cover',
+                border: '2px solid var(--primary-light)',
+                flexShrink: 0,
+              }}
+            />
+            <div>
+              <div style={{ fontWeight:700, fontSize:14, lineHeight:1.2, color:'var(--text-1)' }}>AFC Management</div>
+              <div style={{ fontSize:10, color:'var(--text-3)', marginTop:2 }}>Active Session: Admin</div>
+            </div>
           </div>
           {isMobile && (
             <button onClick={onClose} style={{ background:'none',border:'none',color:'var(--text-3)',padding:4 }}>
@@ -135,8 +146,8 @@ export function TopBar({ page, isMobile, onMenuClick, onLogout }) {
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
         {!isMobile && (
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:'var(--radius-sm)', border:'1.5px solid var(--border)', background:'#fff', fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            <span style={{ width:8,height:8,borderRadius:'50%',background:'var(--primary)',display:'inline-block' }}/>
+          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px 5px 6px', borderRadius:'var(--radius-sm)', border:'1.5px solid var(--border)', background:'#fff', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            <img src="/afc_logo.jpg" alt="AFC" style={{ width:26, height:26, borderRadius:'50%', objectFit:'cover' }}/>
             AFC – Main Branch
             <ChevronDown size={13}/>
           </div>

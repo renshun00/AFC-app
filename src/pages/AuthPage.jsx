@@ -37,6 +37,17 @@ export default function AuthPage({ onLogin }) {
             background: 'var(--primary)', padding: '28px 32px 24px',
             display: 'flex', flexDirection: 'column', alignItems: 'center',
           }}>
+            <img
+              src="/afc_logo.jpg"
+              alt="Alang Fried Chicken"
+              style={{
+                width: 96, height: 96, borderRadius: '50%',
+                objectFit: 'cover',
+                border: '3px solid rgba(255,255,255,0.4)',
+                marginBottom: 14,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+              }}
+            />
             <div style={{ color: '#fff', fontWeight: 700, fontSize: 20, textAlign: 'center', lineHeight: 1.2 }}>
               Alang Fried Chicken
             </div>
@@ -90,11 +101,14 @@ export default function AuthPage({ onLogin }) {
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
 
+            <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'var(--text-3)' }}>
+              Demo: <strong>admin</strong> / <strong>admin123</strong>
+            </div>
           </form>
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--text-3)' }}>
-           2026 AFC Business App 
+          © 2025 AFC Management System · v1.0
         </div>
       </div>
     </div>
