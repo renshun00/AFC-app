@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Clear AFC Cache</title>
+  <style>
+    body { font-family: sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:#f4f4f5; margin:0; }
+    .box { background:#fff; border-radius:16px; padding:32px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,.1); max-width:360px; }
+    h2 { margin-bottom:8px; }
+    p { color:#666; font-size:14px; margin-bottom:20px; }
+    button { background:#e8624a; color:#fff; border:none; padding:12px 28px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+    #status { margin-top:16px; font-size:13px; color:#555; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div style="font-size:48px;margin-bottom:12px">🧹</div>
+    <h2>Clear App Cache</h2>
+    <p>Use this if the app shows a blank screen. It will delete all cached files and reload fresh.</p>
+    <button onclick="clearAll()">Clear Cache & Reload</button>
+    <div id="status"></div>
+  </div>
+  <script>
+    async function clearAll() {
+      const status = document.getElementById('status');
+      status.textContent = 'Clearing caches...';
+      try {
+        // Unregister all service workers
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+        // Delete all caches
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        status.textContent = `Cleared ${regs.length} SW + ${keys.length} caches. Redirecting...`;
+        setTimeout(() => window.location.href = '/', 1200);
+      } catch(e) {
+        status.textContent = 'Error: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>

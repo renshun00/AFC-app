@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>AFC Management – Offline</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'DM Sans',Arial,sans-serif;background:#f4f4f5;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .card{background:#fff;border-radius:20px;padding:40px 32px;max-width:360px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.1)}
+    .logo{width:90px;height:90px;border-radius:50%;object-fit:cover;margin:0 auto 20px;display:block;border:3px solid #fde8e4}
+    h1{font-size:20px;font-weight:700;color:#18181b;margin-bottom:8px}
+    p{font-size:14px;color:#71717a;line-height:1.6;margin-bottom:24px}
+    .badge{display:inline-flex;align-items:center;gap:6px;background:#fde8e4;color:#e8624a;border-radius:99px;padding:5px 14px;font-size:12px;font-weight:600;margin-bottom:20px}
+    button{background:#e8624a;color:#fff;border:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;width:100%}
+    button:hover{opacity:.88}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/afc_logo.jpg" alt="AFC Logo" class="logo"/>
+    <div class="badge">
+      <span>📡</span> No Connection
+    </div>
+    <h1>You're Offline</h1>
+    <p>AFC Management needs a connection for some features. Please check your network and try again.</p>
+    <button onclick="window.location.reload()">Try Again</button>
+  </div>
+</body>
+</html>

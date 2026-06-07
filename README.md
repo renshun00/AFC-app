@@ -1,16 +1,9 @@
-# React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+TO START DEVELOPMENT (CMD)
+1. CLONE THE REPO FIRST, OPEN UP THE FILE PATH THAT YOU WANT TO PLACE THE FILE
+  cd [YOUR_FILE_PATH]
+3. RUN THE CLONE COMMAND
+   git clone -b development https://github.com/renshun00/AFC-app.git
+4. OPEN UP TERMINAL IN THE FOLDER THE FILE IS IN
+   -npm install
+5. TO RUN TEST LOCALLY
+   -npm run dev
