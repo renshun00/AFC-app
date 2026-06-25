@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, ToggleLeft, ToggleRight, TrendingUp, Star } from 'lucide-react';
+import { Plus, Edit2, ToggleLeft, ToggleRight, TrendingUp } from 'lucide-react';
 import { engineeredMenu } from '../data/placeholder';
 import { Modal, FormRow } from '../components/Layout';
 
@@ -11,9 +11,10 @@ export default function MenuEngineeringPage({ isMobile }) {
   const [activeRoster, setActiveRoster] = useState('Active Menu Roster');
 
   const margin = (item) => (((item.price - item.cost) / item.price) * 100).toFixed(1);
+
   const classify = (item) => {
     const avgSold = items.reduce((s,i)=>s+i.sold,0)/items.length;
-    const avgMargin = items.reduce((s,i)=>s+(item.price-item.cost)/item.price*100,0)/items.length;
+    const avgMargin = items.reduce((s,i)=>s+(i.price-i.cost)/i.price*100,0)/items.length;
     const m = (item.price-item.cost)/item.price*100;
     if (item.sold >= avgSold && m >= avgMargin) return { label:'Star', cls:'badge-green' };
     if (item.sold >= avgSold && m < avgMargin) return { label:'Plow Horse', cls:'badge-blue' };
@@ -25,7 +26,7 @@ export default function MenuEngineeringPage({ isMobile }) {
     if (editItem) {
       setItems(prev => prev.map(i => i.id===editItem.id ? { ...i, ...form, price:Number(form.price), cost:Number(form.cost) } : i));
     } else {
-      setItems(prev => [...prev, { id:Date.now(), ...form, price:Number(form.price), cost:Number(form.cost), sold:0, rating:0 }]);
+      setItems(prev => [...prev, { id:Date.now(), ...form, price:Number(form.price), cost:Number(form.cost), sold:0 }]);
     }
     setForm({ name:'',category:'Combo',price:0,cost:0,active:true });
     setEditItem(null);
@@ -92,7 +93,6 @@ export default function MenuEngineeringPage({ isMobile }) {
                 <th>Cost</th>
                 <th>Margin</th>
                 <th>Sold</th>
-                <th>Rating</th>
                 <th>Classification</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -116,12 +116,7 @@ export default function MenuEngineeringPage({ isMobile }) {
                       </div>
                     </td>
                     <td style={{ fontWeight:600 }}>{item.sold}</td>
-                    <td>
-                      <div style={{ display:'flex',alignItems:'center',gap:3 }}>
-                        <Star size={11} style={{ color:'#f59e0b',fill:'#f59e0b' }}/>
-                        <span style={{ fontSize:12,fontWeight:600 }}>{item.rating}</span>
-                      </div>
-                    </td>
+                    {/* Rating column removed — no longer needed */}
                     <td><span className={`badge ${cls.cls}`}>{cls.label}</span></td>
                     <td>
                       <button onClick={()=>toggleActive(item.id)} style={{ background:'none',border:'none',cursor:'pointer',color: item.active?'var(--green)':'var(--text-3)' }}>
