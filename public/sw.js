@@ -1,13 +1,13 @@
 /**
  * AFC Management – Service Worker v4
  */
-const CACHE_VER     = 'v4';
-const CACHE_NAME    = `afc-mgmt-${CACHE_VER}`;
-const FONT_CACHE    = `afc-fonts-${CACHE_VER}`;
+const CACHE_VER = 'v5';
+const CACHE_NAME = `afc-mgmt-${CACHE_VER}`;
+const FONT_CACHE = `afc-fonts-${CACHE_VER}`;
 
 const PRECACHE_URLS = [
-  '/', '/index.html', '/manifest.webmanifest', '/offline.html',
-  '/favicon.png', '/afc_logo.jpg',
+  '/', '/index.html', '/offline.html',
+  '/favicon.png', '/afc_logo.jpg', '/tng_qr_placeholder.svg',
   '/icons/icon-192x192.png', '/icons/icon-512x512.png',
   '/icons/maskable-192x192.png', '/icons/maskable-512x512.png',
 ];
