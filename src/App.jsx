@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useWindowSize } from './hooks/useWindowSize';
 import { Sidebar, TopBar } from './components/Layout';
 import PWAInstallBanner from './components/PWAInstallBanner';
+import { useAuth } from './context/AuthContext';
 
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
@@ -11,52 +12,66 @@ import MenuEngineeringPage from './pages/MenuEngineeringPage';
 import StaffPayrollPage from './pages/StaffPayrollPage';
 import DailyReportPage from './pages/DailyReportPage';
 import ReportsPage from './pages/ReportsPage';
-import { staffList } from './data/placeholder';
 
-// Pages each role can access
-const ROLE_PAGES = {
-  Admin:      ['dashboard','pos','inventory','menu','staff','daily','reports'],
-  Supervisor: ['dashboard','pos','inventory','menu','daily','reports'],
-  Cashier:    ['pos','daily'],
-  Kitchen:    ['pos','inventory','daily'],
-  Driver:     ['pos','daily'],
-  Cleaner:    ['daily'],
-};
+// All authenticated users get access to all pages
+const ALL_PAGES = ['dashboard', 'pos', 'inventory', 'menu', 'staff', 'daily', 'reports'];
 
 export default function App() {
-  const [user, setUser]           = useState(null);
-  const [page, setPage]           = useState('dashboard');
+  const { firebaseUser, profile, loading, logout } = useAuth();
+  const [page, setPage]               = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Keep staff list in App so credentials created in StaffPayroll flow into AuthPage
-  const [staffRegistry, setStaffRegistry] = useState(staffList);
-  const { isMobile, isTablet }    = useWindowSize();
+  const { isMobile, isTablet }        = useWindowSize();
   const isNarrow = isMobile || isTablet;
 
-  const handleLogin = (loggedInUser) => {
-    const allowedPages = ROLE_PAGES[loggedInUser.role] || ['pos'];
-    setPage(allowedPages[0]);   // land on first allowed page
-    setUser({ ...loggedInUser, allowedPages });
-  };
+  // ── Still resolving Firebase Auth state ─────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', background: 'var(--main-bg)',
+      }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
+          <div style={{
+            width: 36, height: 36, border: '3px solid var(--border)',
+            borderTopColor: 'var(--primary)', borderRadius: '50%',
+            animation: 'spin 0.7s linear infinite', margin: '0 auto 12px',
+          }} />
+          <div style={{ fontSize: 13 }}>Loading…</div>
+        </div>
+      </div>
+    );
+  }
 
-  if (!user) {
+  // ── Not logged in ────────────────────────────────────────────────────────────
+  if (!firebaseUser || !profile) {
     return (
       <>
-        <AuthPage onLogin={handleLogin} staffRegistry={staffRegistry} />
+        <AuthPage />
         <PWAInstallBanner />
       </>
     );
   }
 
-  const allowed = user.allowedPages || ROLE_PAGES[user.role] || ['pos'];
+  const allowed = ALL_PAGES;
+
+  // Navigate only to pages the role can access; redirect to first allowed page
+  const navigate = (p) => {
+    if (allowed.includes(p)) {
+      setPage(p);
+    }
+  };
+
+  // If current page is no longer allowed (role changed), snap to first allowed
+  const activePage = allowed.includes(page) ? page : allowed[0];
 
   const renderPage = () => {
     const props = { isMobile: isNarrow };
-    switch (page) {
+    switch (activePage) {
       case 'dashboard': return <DashboardPage {...props} />;
       case 'pos':       return <POSPage {...props} />;
       case 'inventory': return <InventoryPage {...props} />;
       case 'menu':      return <MenuEngineeringPage {...props} />;
-      case 'staff':     return <StaffPayrollPage {...props} onStaffUpdate={setStaffRegistry} />;
+      case 'staff':     return <StaffPayrollPage {...props} />;
       case 'daily':     return <DailyReportPage {...props} />;
       case 'reports':   return <ReportsPage {...props} />;
       default:          return <DashboardPage {...props} />;
@@ -67,13 +82,13 @@ export default function App() {
     <>
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
-          page={page}
-          setPage={(p) => { if (allowed.includes(p)) setPage(p); }}
+          page={activePage}
+          setPage={navigate}
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           isMobile={isNarrow}
           allowedPages={allowed}
-          userRole={user.role}
+          userRole={profile.role}
         />
         <main style={{
           flex: 1,
@@ -85,12 +100,12 @@ export default function App() {
           overflowX: 'hidden',
         }}>
           <TopBar
-            page={page}
+            page={activePage}
             isMobile={isNarrow}
             onMenuClick={() => setSidebarOpen(true)}
-            onLogout={() => { setUser(null); setPage('dashboard'); }}
-            userName={user.name || user.username}
-            userRole={user.role}
+            onLogout={logout}
+            userName={profile.name || profile.username}
+            userRole={profile.role}
           />
           {renderPage()}
         </main>
