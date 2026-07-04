@@ -6,13 +6,12 @@ import {
 } from 'lucide-react';
 
 const NAV = [
-  { key: 'dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
-  { key: 'pos',        label: 'Point of Sale',    icon: ShoppingCart },
-  { key: 'inventory',  label: 'Inventory',        icon: Package },
-  { key: 'menu',       label: 'Menu Engineering', icon: Wrench },
-  { key: 'staff',      label: 'Staff & Payroll',  icon: Users },
-  { key: 'daily',      label: 'Daily Report',     icon: ClipboardList },
-  { key: 'reports',    label: 'Reports',          icon: BarChart2 },
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'pos', label: 'Point of Sale', icon: ShoppingCart },
+  { key: 'inventory', label: 'Inventory', icon: Package },
+  { key: 'menu', label: 'Menu Engineering', icon: Wrench },
+  { key: 'staff', label: 'Staff & Payroll', icon: Users },
+  { key: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
 const ROLE_COLORS = {
