@@ -3,12 +3,13 @@ import { getFirestore }  from 'firebase/firestore';
 import { getAuth }       from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyAIZ2xSHOqTUObwf09N92uCuYelAXzHezM",
+  authDomain: "afc-pwa.firebaseapp.com",
+  projectId: "afc-pwa",
+  storageBucket: "afc-pwa.firebasestorage.app",
+  messagingSenderId: "511194851888",
+  appId: "1:511194851888:web:5ef836ba400b9e8985dbf5",
+  measurementId: "G-Z3Q1SPFFXW"
 };
 
 const app = initializeApp(firebaseConfig);
