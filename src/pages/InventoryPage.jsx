@@ -138,10 +138,11 @@ export default function InventoryPage({ isMobile }) {
     }
   };
 
+  // Hard delete from Firestore
   const handleDeleteItem = async (id) => {
-    if (window.confirm('Are you sure you want to deactivate/delete this stock item?')) {
+    if (window.confirm('Are you sure you want to permanently delete this stock item from the database?')) {
       try {
-        await productService.deactivate(id);
+        await productService.delete(id);
       } catch (error) {
         console.error('Failed to delete item:', error);
       }
@@ -267,7 +268,7 @@ export default function InventoryPage({ isMobile }) {
                       <td style={{ textAlign: 'center' }}>
                         <button
                           className="btn-icon"
-                          title="Deactivate item"
+                          title="Delete item permanently"
                           onClick={() => handleDeleteItem(item.id)}
                           style={{ color: '#dc2626', background: 'transparent', border: 'none', cursor: 'pointer' }}
                         >
@@ -364,7 +365,7 @@ export default function InventoryPage({ isMobile }) {
 
       {/* Wastage Modal */}
       {showWastage && (
-        <Modal title="Log Material Wastage" onClose={() => setShowWastage(false)}>
+        <Modal title="Log Material Wastage" onClose={() => setShowAdd(false)}>
           <FormRow label="Select Item">
             <select
               className="inp"
