@@ -2,16 +2,18 @@ import React from 'react';
 import {
   LayoutDashboard, ShoppingCart, Package, Wrench,
   Users, BarChart2, ClipboardList, Settings,
-  FileText, X, Menu, ChevronDown, Bell, LogOut,
+  FileText, X, Menu, ChevronDown, Bell, LogOut, Truck, FileSpreadsheet,
 } from 'lucide-react';
 
 const NAV = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart },
   { key: 'inventory', label: 'Inventory', icon: Package },
+  { key: 'suppliers', label: 'Suppliers', icon: Truck },
   { key: 'menu', label: 'Menu Engineering', icon: Wrench },
   { key: 'staff', label: 'Staff & Payroll', icon: Users },
   { key: 'reports', label: 'Reports', icon: BarChart2 },
+  { key: 'import', label: 'Excel Import', icon: FileSpreadsheet },
 ];
 
 const ROLE_COLORS = {
@@ -128,7 +130,8 @@ export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRo
     dashboard: 'Dashboard Overview', pos: 'Point of Sale',
     inventory: 'Inventory Management', menu: 'Menu Engineering',
     staff: 'Staff & Payroll Operations', daily: 'Daily Reconciliation',
-    reports: 'Reports & Analytics',
+    reports: 'Reports & Analytics', suppliers: 'Supplier Management',
+    import: 'Excel Import',
   };
   const subs = {
     dashboard: 'High-level operations summary for today.',
@@ -138,6 +141,8 @@ export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRo
     staff: 'Track staff tasks and calculate wages.',
     daily: 'End-of-day summary and P&L.',
     reports: 'Monthly analytics and performance.',
+    suppliers: 'Track suppliers, items bought and spend.',
+    import: 'Import materials and payroll data from Excel.',
   };
   const rc = userRole ? ROLE_COLORS[userRole] : null;
 

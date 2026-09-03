@@ -12,9 +12,11 @@ import MenuEngineeringPage from './pages/MenuEngineeringPage';
 import StaffPayrollPage from './pages/StaffPayrollPage';
 import DailyReportPage from './pages/DailyReportPage';
 import ReportsPage from './pages/ReportsPage';
+import SuppliersPage from './pages/SuppliersPage';
+import ExcelImportPage from './pages/ExcelImportPage';
 
 // All authenticated users get access to all pages
-const ALL_PAGES = ['dashboard', 'pos', 'inventory', 'menu', 'staff', 'daily', 'reports'];
+const ALL_PAGES = ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports', 'import'];
 
 export default function App() {
   const { firebaseUser, profile, loading, logout } = useAuth();
@@ -70,6 +72,8 @@ export default function App() {
       case 'dashboard': return <DashboardPage {...props} />;
       case 'pos':       return <POSPage {...props} />;
       case 'inventory': return <InventoryPage {...props} />;
+      case 'suppliers': return <SuppliersPage {...props} />;
+      case 'import': return <ExcelImportPage {...props} />;
       case 'menu':      return <MenuEngineeringPage {...props} />;
       case 'staff':     return <StaffPayrollPage {...props} />;
       case 'daily':     return <DailyReportPage {...props} />;

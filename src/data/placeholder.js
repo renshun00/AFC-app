@@ -207,3 +207,32 @@ export const dailyReportData = {
     { name: 'Priya N.',  role: 'Supervisor', hours: 8, wage: 155 },
   ],
 };
+
+// ── SUPPLIERS ──────────────────────────────────────────────────────────────────
+export const suppliers = [
+  { id: 1, name: 'FreshFarm',    category: 'Fresh Produce & Poultry', contact: 'Ahmad Razak',    phone: '+60 12-345 6789', email: 'orders@freshfarm.my'    },
+  { id: 2, name: 'OilMart',      category: 'Cooking Oil',             contact: 'Lim Wei Sern',    phone: '+60 12-456 7890', email: 'sales@oilmart.my'       },
+  { id: 3, name: 'FlourBest',    category: 'Dry Goods',               contact: 'Siti Aminah',     phone: '+60 13-567 8901', email: 'info@flourbest.my'      },
+  { id: 4, name: 'SpiceCo',      category: 'Seasoning & Spices',      contact: 'Raj Kumar',       phone: '+60 16-678 9012', email: 'raj@spiceco.my'         },
+  { id: 5, name: 'BreadHouse',   category: 'Bakery Supplies',         contact: 'Chong Mei Ling',  phone: '+60 12-789 0123', email: 'orders@breadhouse.my'   },
+  { id: 6, name: 'FoodPrime',    category: 'Frozen Goods',            contact: 'Faizal Hakim',    phone: '+60 17-890 1234', email: 'faizal@foodprime.my'    },
+  { id: 7, name: 'SauceMaster',  category: 'Condiments',              contact: 'Priya Devi',      phone: '+60 19-901 2345', email: 'priya@saucemaster.my'   },
+  { id: 8, name: 'PackCo',       category: 'Packaging',               contact: 'Kevin Tan',       phone: '+60 12-012 3456', email: 'kevin@packco.my'        },
+];
+
+// Purchase history — used to compute "items bought" and "total spent" per supplier
+export const supplierPurchases = [
+  { id: 1,  supplier: 'FreshFarm',   date: '2026-08-20', item: 'Chicken (Whole)',        qty: 100, unit: 'kg',  amount: 850.00 },
+  { id: 2,  supplier: 'FreshFarm',   date: '2026-08-13', item: 'Chicken (Whole)',        qty: 100, unit: 'kg',  amount: 850.00 },
+  { id: 3,  supplier: 'FreshFarm',   date: '2026-08-06', item: 'Coleslaw Mix',           qty: 20,  unit: 'kg',  amount: 64.00  },
+  { id: 4,  supplier: 'OilMart',     date: '2026-08-18', item: 'Cooking Oil',            qty: 50,  unit: 'L',   amount: 210.00 },
+  { id: 5,  supplier: 'OilMart',     date: '2026-08-04', item: 'Cooking Oil',            qty: 50,  unit: 'L',   amount: 210.00 },
+  { id: 6,  supplier: 'FlourBest',   date: '2026-08-15', item: 'Plain Flour',            qty: 70,  unit: 'kg',  amount: 147.00 },
+  { id: 7,  supplier: 'SpiceCo',     date: '2026-08-10', item: 'Seasoning Mix',          qty: 15,  unit: 'kg',  amount: 180.00 },
+  { id: 8,  supplier: 'BreadHouse',  date: '2026-08-19', item: 'Burger Buns',            qty: 300, unit: 'pcs', amount: 180.00 },
+  { id: 9,  supplier: 'BreadHouse',  date: '2026-08-05', item: 'Burger Buns',            qty: 300, unit: 'pcs', amount: 180.00 },
+  { id: 10, supplier: 'FoodPrime',   date: '2026-08-12', item: 'Potato Wedges (Frozen)', qty: 60,  unit: 'kg',  amount: 348.00 },
+  { id: 11, supplier: 'SauceMaster', date: '2026-08-08', item: 'Chilli Sauce',           qty: 30,  unit: 'L',   amount: 180.00 },
+  { id: 12, supplier: 'PackCo',      date: '2026-08-17', item: 'Paper Bags',             qty: 1000,unit: 'pcs', amount: 80.00  },
+  { id: 13, supplier: 'PackCo',      date: '2026-08-03', item: 'Plastic Cups',           qty: 600, unit: 'pcs', amount: 30.00  },
+];
