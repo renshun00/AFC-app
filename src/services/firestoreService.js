@@ -666,6 +666,8 @@ export const productService = {
 
   deactivate: (id) =>
     updateDoc(ref('products', id), { isActive: false, updatedAt: serverTimestamp() }),
+
+  delete: (id) => deleteDoc(ref('products', id)),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
