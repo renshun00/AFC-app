@@ -1,9 +1,20 @@
 import React, { useState } from 'react';
+import { where, orderBy } from 'firebase/firestore';
 import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff } from 'lucide-react';
-import { menuItems, posOrders } from '../data/placeholder';
+import { useFirestore } from '../hooks/useFirestore';
+import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService } from '../services/firestoreService';
 import { Modal } from '../components/Layout';
 
-const CATEGORIES = ['All', 'Combo', 'Chicken', 'Sides', 'Drinks', 'Sauce'];
+// ── Firestore doc → POS card shape ──────────────────────────────────────────
+const fromDoc = (d) => ({
+  id: d.id,
+  name: d.name ?? '',
+  price: d.sellingPrice ?? 0,
+  category: d.categoryId ?? '',
+  img: d.img ?? null,
+  imgPlaceholder: d.imgPlaceholder ?? '🍽️',
+  stock: d.stock ?? 999,
+});
 
 // ── Shared menu item image component ─────────────────────────────────────────
 // Shows the uploaded image if available, else the emoji placeholder, else a grey box.
@@ -48,20 +59,53 @@ function MenuItemImage({ item, size = 72, radius = 8, fontSize = 32 }) {
 // or change TNG_QR_IMAGE_PATH below to point at a new asset.
 const TNG_QR_IMAGE_PATH = '/tng_qr_placeholder.svg';
 
+// ── Helper: today's date start (midnight) for filtering ──────────────────────
+function todayStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export default function POSPage({ isMobile }) {
+  // ── Real-time Firestore subscriptions ────────────────────────────────────
+  const { data: productDocs, loading, error } = useFirestore(
+    'products',
+    where('showOnPos', '==', true),
+    where('isActive', '==', true),
+    orderBy('name'),
+  );
+  const menuItems = productDocs.map(fromDoc);
+
+  // Real-time orders subscription (all orders, filtered to today client-side)
+  const { data: orderDocs } = useFirestore(
+    'sales_orders',
+    orderBy('createdAt', 'desc'),
+  );
+  const todayOrders = orderDocs.filter(o => {
+    if (!o.createdAt) return false;
+    const ts = o.createdAt.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
+    return ts >= todayStart();
+  }).slice(0, 20); // limit display to 20 recent orders
+
+  // Derive categories from loaded products
+  const uniqueCategories = [...new Set(menuItems.map(m => m.category).filter(Boolean))];
+  const CATEGORIES = ['All', ...uniqueCategories];
+
   const [activeCategory, setActiveCategory] = useState('All');
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
-  const [currentOrders, setCurrentOrders] = useState(posOrders);
+  const [saving, setSaving] = useState(false);
 
   // Discount state
   const [discountEnabled, setDiscountEnabled] = useState(false);
-  const [discountType, setDiscountType]       = useState('percentage');
-  const [discountValue, setDiscountValue]     = useState('');
+  const [discountType, setDiscountType] = useState('percentage');
+  const [discountValue, setDiscountValue] = useState('');
 
   // Payment flow: null → 'method' → 'cash' | 'tng' → 'done'
-  const [payStep, setPayStep]       = useState(null);
+  const [payStep, setPayStep] = useState(null);
   const [cashTendered, setCashTendered] = useState('');
+  // Track the payment method chosen for the current transaction
+  const [payMethod, setPayMethod] = useState(null);
 
   const filtered = menuItems.filter(m =>
     (activeCategory === 'All' || m.category === activeCategory) &&
@@ -80,7 +124,7 @@ export default function POSPage({ isMobile }) {
     setCart(c => c.map(x => x.id === id ? { ...x, qty: Math.max(0, x.qty + delta) } : x).filter(x => x.qty > 0));
   };
 
-  const subtotal    = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
   const discountAmt = (() => {
     if (!discountEnabled || !discountValue || isNaN(Number(discountValue))) return 0;
@@ -93,29 +137,77 @@ export default function POSPage({ isMobile }) {
 
   // SST disabled — to re-enable: uncomment next line, set tax = afterDiscount * SST_RATE
   // const SST_RATE = 0.06;
-  const tax        = 0;
+  const tax = 0;
   const grandTotal = afterDiscount + tax;
 
-  const resetPayment = () => { setPayStep(null); setCashTendered(''); };
+  const resetPayment = () => { setPayStep(null); setCashTendered(''); setPayMethod(null); };
 
-  const confirmOrder = () => {
+  // ── Submit order to Firestore ───────────────────────────────────────────
+  const confirmOrder = async () => {
     if (!cart.length) return;
-    setCurrentOrders(o => [...o, {
-      id: `ORD-00${o.length + 1}`,
-      table: `T${o.length + 1}`,
-      items: cart.reduce((s, i) => s + i.qty, 0),
-      total: grandTotal,
-      status: 'open',
-      time: new Date().toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' }),
-    }]);
-    setCart([]);
-    setDiscountEnabled(false);
-    setDiscountValue('');
-    resetPayment();
+    setSaving(true);
+    try {
+      // 1. Create the sales order
+      const orderId = await salesOrderService.create({
+        outletId: 'main_branch',
+        staffId: 'pos_user',
+        subtotal,
+        discount: discountAmt,
+        total: grandTotal,
+        status: 'completed',
+        items: cart.map(item => ({
+          menuItemId: item.id,
+          qty: item.qty,
+          price: item.price,
+        })),
+      });
+
+      // 2. Record the payment transaction
+      await paymentTransactionService.record({
+        salesOrderId: orderId,
+        method: payMethod || 'cash',
+        amount: grandTotal,
+      });
+
+      // 3. Deduct stock and log inventory transactions for each item
+      for (const item of cart) {
+        // Find the current stock from the live product docs
+        const prodDoc = productDocs.find(p => p.id === item.id);
+        if (prodDoc && typeof prodDoc.stock === 'number') {
+          const newStock = Math.max(0, prodDoc.stock - item.qty);
+          await productService.update(item.id, { stock: newStock });
+        }
+        await inventoryTransactionService.logProduction(item.id, item.qty, orderId);
+      }
+
+      // 4. Reset cart and payment state
+      setCart([]);
+      setDiscountEnabled(false);
+      setDiscountValue('');
+      resetPayment();
+    } catch (err) {
+      console.error('[POSPage] order submission failed:', err);
+      alert('Could not submit the order. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const cashChange = cashTendered ? Math.max(0, Number(cashTendered) - grandTotal) : 0;
-  const cashValid  = Number(cashTendered) >= grandTotal;
+  const cashValid = Number(cashTendered) >= grandTotal;
+
+  // ── Loading / error states ────────────────────────────────────────────────
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading POS menu…</div>;
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 'var(--radius)', padding: 16, color: '#dc2626', fontSize: 13 }}>
+        Couldn't load menu from Firestore: {error}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 320px', gap: 14, height: isMobile ? 'auto' : 'calc(100vh - 140px)' }}>
@@ -140,53 +232,70 @@ export default function POSPage({ isMobile }) {
 
         {/* ── Menu grid — images ── */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10 }}>
-            {filtered.map(item => {
-              const inCart = cart.find(x => x.id === item.id);
-              return (
-                <div key={item.id} onClick={() => addItem(item)}
-                  style={{
-                    background: inCart ? 'var(--primary-light)' : '#fafafa',
-                    border: `1.5px solid ${inCart ? 'var(--primary)' : 'var(--border)'}`,
-                    borderRadius: 'var(--radius)', padding: '10px 10px 12px', cursor: 'pointer',
-                    transition: 'all .12s', position: 'relative',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow)'}
-                  onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-                >
-                  {/* Image or emoji placeholder */}
-                  <MenuItemImage item={item} size={80} radius={8} fontSize={36} />
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)' }}>
+              <ShoppingBag size={32} style={{ marginBottom: 8, opacity: .4 }} />
+              <div style={{ fontSize: 13 }}>No menu items found.<br />Add items via Menu Engineering page.</div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10 }}>
+              {filtered.map(item => {
+                const inCart = cart.find(x => x.id === item.id);
+                return (
+                  <div key={item.id} onClick={() => addItem(item)}
+                    style={{
+                      background: inCart ? 'var(--primary-light)' : '#fafafa',
+                      border: `1.5px solid ${inCart ? 'var(--primary)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius)', padding: '10px 10px 12px', cursor: 'pointer',
+                      transition: 'all .12s', position: 'relative',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow)'}
+                    onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                  >
+                    {/* Image or emoji placeholder */}
+                    <MenuItemImage item={item} size={80} radius={8} fontSize={36} />
 
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, lineHeight: 1.3, textAlign: 'center' }}>{item.name}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>RM{item.price.toFixed(2)}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, textAlign: 'center' }}>Stock: {item.stock}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, lineHeight: 1.3, textAlign: 'center' }}>{item.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>RM{item.price.toFixed(2)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, textAlign: 'center' }}>Stock: {item.stock}</div>
 
-                  {inCart && (
-                    <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
-                      {inCart.qty}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {inCart && (
+                      <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                        {inCart.qty}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Current Orders strip */}
         <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', background: '#fafafa' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Current Orders</div>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
-            {currentOrders.map(o => (
-              <div key={o.id} style={{ flexShrink: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', minWidth: 110 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>{o.table}</span>
-                  <span className={`badge ${o.status === 'ready' ? 'badge-green' : 'badge-amber'}`}>{o.status}</span>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{o.items} items · RM{o.total.toFixed(2)}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{o.time}</div>
-              </div>
-            ))}
-          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Today's Orders ({todayOrders.length})</div>
+          {todayOrders.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '4px 0' }}>No orders yet today.</div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
+              {todayOrders.map(o => {
+                const itemCount = Array.isArray(o.items) ? o.items.reduce((s, i) => s + (i.qty || 1), 0) : 0;
+                const time = o.createdAt?.toDate
+                  ? o.createdAt.toDate().toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' })
+                  : '';
+                return (
+                  <div key={o.id} style={{ flexShrink: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', minWidth: 110 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>{o.id.slice(-6).toUpperCase()}</span>
+                      <span className={`badge ${o.status === 'completed' ? 'badge-green' : 'badge-amber'}`}>{o.status}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{itemCount} items · RM{(o.total ?? 0).toFixed(2)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{time}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -297,11 +406,12 @@ export default function POSPage({ isMobile }) {
             <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => { setCart([]); setDiscountEnabled(false); setDiscountValue(''); }}>Clear</button>
             <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }}
-              onClick={() => { if (cart.length) setPayStep('method'); }}>
-              Pay RM{grandTotal.toFixed(2)}
+              onClick={() => { if (cart.length) setPayStep('method'); }} disabled={saving}>
+              {saving ? 'Processing…' : `Pay RM${grandTotal.toFixed(2)}`}
             </button>
           </div>
-          <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 12 }} onClick={confirmOrder}>
+          <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 12 }}
+            onClick={confirmOrder} disabled={saving}>
             + Save as New Order
           </button>
         </div>
@@ -314,7 +424,7 @@ export default function POSPage({ isMobile }) {
             Total to collect: <strong style={{ fontSize: 18, color: 'var(--text-1)' }}>RM{grandTotal.toFixed(2)}</strong>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <button onClick={() => { setCashTendered(''); setPayStep('cash'); }}
+            <button onClick={() => { setCashTendered(''); setPayMethod('cash'); setPayStep('cash'); }}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '24px 16px', borderRadius: 'var(--radius)', border: '2px solid var(--border)', background: '#fafafa', cursor: 'pointer', transition: 'all .15s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#16a34a'; e.currentTarget.style.background = '#f0fdf4'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = '#fafafa'; }}>
@@ -324,7 +434,7 @@ export default function POSPage({ isMobile }) {
               <div style={{ fontWeight: 700, fontSize: 15 }}>Cash</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Physical notes & coins</div>
             </button>
-            <button onClick={() => setPayStep('tng')}
+            <button onClick={() => { setPayMethod('ewallet'); setPayStep('tng'); }}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '24px 16px', borderRadius: 'var(--radius)', border: '2px solid var(--border)', background: '#fafafa', cursor: 'pointer', transition: 'all .15s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#FF6600'; e.currentTarget.style.background = '#fff7ed'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = '#fafafa'; }}>
@@ -437,10 +547,10 @@ export default function POSPage({ isMobile }) {
                 <div style={{ marginTop: 4, color: '#16a34a', fontWeight: 600 }}>Change: RM{cashChange.toFixed(2)}</div>
               )}
             </div>
-            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 14 }} onClick={confirmOrder}>
-              <Printer size={15} /> Print Receipt & New Order
+            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 14 }} onClick={confirmOrder} disabled={saving}>
+              <Printer size={15} /> {saving ? 'Saving…' : 'Print Receipt & New Order'}
             </button>
-            <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 13 }} onClick={confirmOrder}>
+            <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 13 }} onClick={confirmOrder} disabled={saving}>
               Skip Receipt
             </button>
           </div>

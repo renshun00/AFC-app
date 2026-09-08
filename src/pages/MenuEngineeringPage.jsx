@@ -1,7 +1,34 @@
 import React, { useState, useRef } from 'react';
-import { Plus, Edit2, ToggleLeft, ToggleRight, TrendingUp, ImageOff, Upload, X } from 'lucide-react';
-import { engineeredMenu } from '../data/placeholder';
+import { where, orderBy } from 'firebase/firestore';
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, TrendingUp, ImageOff, Upload, X } from 'lucide-react';
+import { useFirestore } from '../hooks/useFirestore';
+import { productService } from '../services/firestoreService';
 import { Modal, FormRow } from '../components/Layout';
+
+// ── Firestore doc ↔ UI shape mappers ──────────────────────────────────────────
+// products collection fields → component-friendly shape
+const fromDoc = (d) => ({
+  id: d.id,
+  name: d.name ?? '',
+  category: d.categoryId ?? '',
+  price: d.sellingPrice ?? 0,
+  cost: d.standardCost ?? 0,
+  active: d.showOnPos ?? true,
+  img: d.img ?? null,
+  imgPlaceholder: d.imgPlaceholder ?? '🍽️',
+});
+
+const toDoc = (form) => ({
+  name: form.name,
+  categoryId: form.category,
+  sellingPrice: Number(form.price),
+  standardCost: Number(form.cost),
+  showOnPos: form.active,
+  isInventoryItem: false,
+  isActive: true,
+  img: form.img ?? null,
+  imgPlaceholder: form.imgPlaceholder ?? '🍽️',
+});
 
 // ── Shared image display: real photo > emoji placeholder > grey box ─────────
 function ItemImage({ item, size = 40, radius = 6 }) {
@@ -82,33 +109,50 @@ function ImageUploader({ value, onChange }) {
   );
 }
 
+const emptyForm = { name: '', category: 'Combo', price: 0, cost: 0, active: true, img: null, imgPlaceholder: '🍽️' };
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MenuEngineeringPage({ isMobile }) {
-  const [items, setItems]       = useState(engineeredMenu);
+  // Real-time Firestore subscription — all products that are menu items
+  const { data: productDocs, loading, error } = useFirestore(
+    'products',
+    where('isActive', '==', true),
+    orderBy('name'),
+  );
+  // Show all products but mark which are on POS menu
+  const items = productDocs
+    .filter(d => d.showOnPos === true)
+    .map(fromDoc);
+
   const [showAdd, setShowAdd]   = useState(false);
   const [editItem, setEditItem] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [activeRoster, setActiveRoster] = useState('Active Menu Roster');
 
-  const emptyForm = { name: '', category: 'Combo', price: 0, cost: 0, active: true, img: null, imgPlaceholder: '🍽️' };
   const [form, setForm] = useState(emptyForm);
 
-  const margin = (item) => (((item.price - item.cost) / item.price) * 100).toFixed(1);
+  const margin = (item) => item.price > 0 ? (((item.price - item.cost) / item.price) * 100).toFixed(1) : '0.0';
 
-  const handleSave = () => {
-    if (editItem) {
-      setItems(prev => prev.map(i => i.id === editItem.id
-        ? { ...i, ...form, price: Number(form.price), cost: Number(form.cost) }
-        : i
-      ));
-    } else {
-      setItems(prev => [...prev, {
-        id: Date.now(), ...form,
-        price: Number(form.price), cost: Number(form.cost), sold: 0,
-      }]);
+  // ── Firestore CRUD ────────────────────────────────────────────────────────
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (editItem) {
+        await productService.update(editItem.id, toDoc(form));
+      } else {
+        await productService.create(toDoc(form));
+      }
+      setForm(emptyForm);
+      setEditItem(null);
+      setShowAdd(false);
+    } catch (err) {
+      console.error('[MenuEngineeringPage] save failed:', err);
+      alert('Could not save the item. Please try again.');
+    } finally {
+      setSaving(false);
     }
-    setForm(emptyForm);
-    setEditItem(null);
-    setShowAdd(false);
   };
 
   const openEdit = (item) => {
@@ -117,23 +161,63 @@ export default function MenuEngineeringPage({ isMobile }) {
     setShowAdd(true);
   };
 
-  const toggleActive = (id) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, active: !i.active } : i));
+  const toggleActive = async (item) => {
+    try {
+      await productService.update(item.id, { showOnPos: !item.active });
+    } catch (err) {
+      console.error('[MenuEngineeringPage] toggle active failed:', err);
+      alert('Could not update the item. Please try again.');
+    }
   };
 
+  const openDeleteConfirm = (item) => {
+    setDeleteTarget(item);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+    try {
+      await productService.delete(deleteTarget.id);
+      setShowDeleteConfirm(false);
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error('[MenuEngineeringPage] delete failed:', err);
+      alert('Could not delete the item. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Derived stats ─────────────────────────────────────────────────────────
   const activeItems  = items.filter(i => i.active);
-  const totalRevenue = items.reduce((s, i) => s + i.price * i.sold, 0);
-  const avgMarginPct = (items.reduce((s, i) => s + (i.price - i.cost) / i.price * 100, 0) / items.length).toFixed(1);
+  const avgMarginPct = items.length > 0
+    ? (items.reduce((s, i) => s + (i.price > 0 ? (i.price - i.cost) / i.price * 100 : 0), 0) / items.length).toFixed(1)
+    : '0.0';
+
+  // ── Loading / error states ────────────────────────────────────────────────
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading menu items…</div>;
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 'var(--radius)', padding: 16, color: '#dc2626', fontSize: 13 }}>
+        Couldn't load menu items from Firestore: {error}
+      </div>
+    );
+  }
 
   return (
     <div>
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 2 : 4},1fr)`, gap: 10, marginBottom: 14 }}>
         {[
-          { label: 'Active Items',    value: activeItems.length },
-          { label: 'Avg. Margin',     value: `${avgMarginPct}%` },
-          { label: 'Total Items Sold',value: items.reduce((s, i) => s + i.sold, 0) },
-          { label: 'Est. Revenue',    value: `RM${totalRevenue.toLocaleString()}` },
+          { label: 'Total Menu Items', value: items.length },
+          { label: 'Active Items',     value: activeItems.length },
+          { label: 'Avg. Margin',      value: `${avgMarginPct}%` },
+          { label: 'Categories',       value: new Set(items.map(i => i.category)).size },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>{s.label}</div>
@@ -170,8 +254,6 @@ export default function MenuEngineeringPage({ isMobile }) {
                 <th>Price</th>
                 <th>Cost</th>
                 <th>Margin</th>
-                <th>Sold</th>
-                {/* Classification column removed */}
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -195,17 +277,20 @@ export default function MenuEngineeringPage({ isMobile }) {
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{margin(item)}%</span>
                     </div>
                   </td>
-                  <td style={{ fontWeight: 600 }}>{item.sold}</td>
-                  {/* Classification cell removed */}
                   <td>
-                    <button onClick={() => toggleActive(item.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: item.active ? 'var(--green)' : 'var(--text-3)' }}>
+                    <button onClick={() => toggleActive(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: item.active ? 'var(--green)' : 'var(--text-3)' }}>
                       {item.active ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
                     </button>
                   </td>
                   <td>
-                    <button onClick={() => openEdit(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4 }}>
-                      <Edit2 size={14} />
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => openEdit(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4 }}>
+                        <Edit2 size={14} />
+                      </button>
+                      <button onClick={() => openDeleteConfirm(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 4 }}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -272,8 +357,23 @@ export default function MenuEngineeringPage({ isMobile }) {
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => { setShowAdd(false); setEditItem(null); }}>Cancel</button>
-            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleSave}>
-              {editItem ? 'Save Changes' : 'Add Item'}
+            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : editItem ? 'Save Changes' : 'Add Item'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && deleteTarget && (
+        <Modal title="Delete Menu Item" onClose={() => { setShowDeleteConfirm(false); setDeleteTarget(null); }}>
+          <p style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 16 }}>
+            Are you sure you want to <strong>permanently delete</strong> <strong>{deleteTarget.name}</strong> from the menu? This cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setShowDeleteConfirm(false); setDeleteTarget(null); }}>Cancel</button>
+            <button className="btn btn-danger" style={{ flex: 1, justifyContent: 'center' }} onClick={handleDelete} disabled={saving}>
+              <Trash2 size={14} /> {saving ? 'Deleting…' : 'Delete'}
             </button>
           </div>
         </Modal>
