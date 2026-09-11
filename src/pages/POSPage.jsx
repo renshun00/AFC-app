@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
-import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff } from 'lucide-react';
+import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff, AlertTriangle } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
-import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService } from '../services/firestoreService';
+import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService, recipeService } from '../services/firestoreService';
 import { Modal } from '../components/Layout';
 
 // ── Firestore doc → POS card shape ──────────────────────────────────────────
@@ -14,6 +14,7 @@ const fromDoc = (d) => ({
   img: d.img ?? null,
   imgPlaceholder: d.imgPlaceholder ?? '🍽️',
   stock: d.stock ?? 999,
+  recipe: d.recipe ?? [],
 });
 
 // ── Shared menu item image component ─────────────────────────────────────────
@@ -75,6 +76,27 @@ export default function POSPage({ isMobile }) {
     orderBy('name'),
   );
   const menuItems = productDocs.map(fromDoc);
+
+  // Real-time subscription to inventory items (for recipe-aware stock calc)
+  const { data: inventoryDocs } = useFirestore(
+    'products',
+    where('isInventoryItem', '==', true),
+    where('isActive', '==', true),
+    orderBy('name'),
+  );
+
+  // Compute available qty for each menu item from recipe + inventory stock
+  const availableQtyMap = useMemo(() => {
+    const map = {};
+    for (const item of menuItems) {
+      if (item.recipe && item.recipe.length > 0) {
+        map[item.id] = recipeService.calculateAvailableQty(item.recipe, inventoryDocs);
+      } else {
+        map[item.id] = item.stock; // fallback to simple stock
+      }
+    }
+    return map;
+  }, [menuItems, inventoryDocs]);
 
   // Real-time orders subscription (all orders, filtered to today client-side)
   const { data: orderDocs } = useFirestore(
@@ -147,7 +169,7 @@ export default function POSPage({ isMobile }) {
     if (!cart.length) return;
     setSaving(true);
     try {
-      // 1. Create the sales order
+      // 1. Create the sales order (include recipe snapshot for reporting)
       const orderId = await salesOrderService.create({
         outletId: 'main_branch',
         staffId: 'pos_user',
@@ -159,6 +181,7 @@ export default function POSPage({ isMobile }) {
           menuItemId: item.id,
           qty: item.qty,
           price: item.price,
+          recipe: item.recipe || [],
         })),
       });
 
@@ -169,15 +192,25 @@ export default function POSPage({ isMobile }) {
         amount: grandTotal,
       });
 
-      // 3. Deduct stock and log inventory transactions for each item
+      // 3. Deduct stock — recipe-aware ingredient deduction
       for (const item of cart) {
-        // Find the current stock from the live product docs
-        const prodDoc = productDocs.find(p => p.id === item.id);
-        if (prodDoc && typeof prodDoc.stock === 'number') {
-          const newStock = Math.max(0, prodDoc.stock - item.qty);
-          await productService.update(item.id, { stock: newStock });
+        if (item.recipe && item.recipe.length > 0) {
+          // Recipe exists: deduct each raw material ingredient
+          await recipeService.deductIngredients(
+            item.recipe,
+            item.qty,
+            orderId,
+            inventoryDocs,
+          );
+        } else {
+          // No recipe: fall back to simple stock deduction on the menu item
+          const prodDoc = productDocs.find(p => p.id === item.id);
+          if (prodDoc && typeof prodDoc.stock === 'number') {
+            const newStock = Math.max(0, prodDoc.stock - item.qty);
+            await productService.update(item.id, { stock: newStock });
+          }
+          await inventoryTransactionService.logProduction(item.id, item.qty, orderId);
         }
-        await inventoryTransactionService.logProduction(item.id, item.qty, orderId);
       }
 
       // 4. Reset cart and payment state
@@ -241,23 +274,50 @@ export default function POSPage({ isMobile }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10 }}>
               {filtered.map(item => {
                 const inCart = cart.find(x => x.id === item.id);
+                const availQty = availableQtyMap[item.id] ?? item.stock;
+                const isOutOfStock = availQty <= 0;
+                const isLowStock = availQty > 0 && availQty <= 5;
                 return (
-                  <div key={item.id} onClick={() => addItem(item)}
+                  <div key={item.id} onClick={() => { if (!isOutOfStock) addItem(item); }}
                     style={{
-                      background: inCart ? 'var(--primary-light)' : '#fafafa',
-                      border: `1.5px solid ${inCart ? 'var(--primary)' : 'var(--border)'}`,
-                      borderRadius: 'var(--radius)', padding: '10px 10px 12px', cursor: 'pointer',
+                      background: isOutOfStock ? '#f9f9f9' : inCart ? 'var(--primary-light)' : '#fafafa',
+                      border: `1.5px solid ${isOutOfStock ? '#e5e5e5' : inCart ? 'var(--primary)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius)', padding: '10px 10px 12px',
+                      cursor: isOutOfStock ? 'not-allowed' : 'pointer',
                       transition: 'all .12s', position: 'relative',
+                      opacity: isOutOfStock ? 0.5 : 1,
                     }}
-                    onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow)'}
+                    onMouseEnter={e => { if (!isOutOfStock) e.currentTarget.style.boxShadow = 'var(--shadow)'; }}
                     onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
                   >
+                    {/* Out of stock overlay */}
+                    {isOutOfStock && (
+                      <div style={{
+                        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', zIndex: 2, borderRadius: 'var(--radius)',
+                      }}>
+                        <span style={{
+                          background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 700,
+                          padding: '3px 8px', borderRadius: 4, textTransform: 'uppercase',
+                        }}>
+                          Sold Out
+                        </span>
+                      </div>
+                    )}
+
                     {/* Image or emoji placeholder */}
                     <MenuItemImage item={item} size={80} radius={8} fontSize={36} />
 
                     <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, lineHeight: 1.3, textAlign: 'center' }}>{item.name}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>RM{item.price.toFixed(2)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, textAlign: 'center' }}>Stock: {item.stock}</div>
+                    <div style={{
+                      fontSize: 10, marginTop: 2, textAlign: 'center', fontWeight: 600,
+                      color: isOutOfStock ? '#dc2626' : isLowStock ? '#ea580c' : 'var(--text-3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                    }}>
+                      {isLowStock && <AlertTriangle size={10} />}
+                      {isOutOfStock ? 'Out of Stock' : `Available: ${availQty === Infinity ? '∞' : availQty}`}
+                    </div>
 
                     {inCart && (
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>

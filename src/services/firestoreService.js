@@ -660,7 +660,7 @@ export const productService = {
   },
 
   create: (data) =>
-    insert('products', { ...data, isActive: data.isActive ?? true }),
+    insert('products', { ...data, isActive: data.isActive ?? true, recipe: data.recipe ?? [] }),
 
   update: (id, data) => patch('products', id, data),
 
@@ -668,6 +668,154 @@ export const productService = {
     updateDoc(ref('products', id), { isActive: false, updatedAt: serverTimestamp() }),
 
   delete: (id) => deleteDoc(ref('products', id)),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIT CONVERSION HELPERS (g↔kg, mL↔L)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Defines which recipe sub-units map to which inventory base units,
+ * and the conversion factor.
+ *
+ * recipeUnit → { baseUnit, factor }
+ * "60 g" → 60 / 1000 = 0.06 kg
+ * "200 mL" → 200 / 1000 = 0.2 L
+ */
+const UNIT_CONVERSIONS = {
+  g:  { baseUnit: 'kg', factor: 1000 },   // 1 kg = 1000 g
+  mL: { baseUnit: 'L',  factor: 1000 },   // 1 L  = 1000 mL
+};
+
+/** All recipe-entry units available for a given inventory base unit. */
+export const RECIPE_UNITS_FOR_BASE = {
+  kg:   ['g', 'kg'],
+  L:    ['mL', 'L'],
+  pcs:  ['pcs'],
+  box:  ['box'],
+  pack: ['pack'],
+};
+
+/**
+ * Convert a recipe quantity to the inventory's base unit.
+ * e.g. convertToBaseUnit(60, 'g')  → 0.06  (kg)
+ *      convertToBaseUnit(2, 'kg')  → 2     (kg, no conversion needed)
+ *      convertToBaseUnit(5, 'pcs') → 5     (pcs, no conversion needed)
+ */
+export function convertToBaseUnit(qty, recipeUnit) {
+  const conv = UNIT_CONVERSIONS[recipeUnit];
+  if (conv) return qty / conv.factor;
+  return qty; // already in base unit
+}
+
+/**
+ * Convert an inventory base-unit quantity to a recipe sub-unit.
+ * e.g. convertFromBaseUnit(0.06, 'g') → 60  (from kg)
+ */
+export function convertFromBaseUnit(baseQty, recipeUnit) {
+  const conv = UNIT_CONVERSIONS[recipeUnit];
+  if (conv) return baseQty * conv.factor;
+  return baseQty;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECIPE SERVICE — Menu Item ↔ Inventory linkage
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recipe entry shape (stored on the product doc):
+ * {
+ *   inventoryItemId:   string,   // products doc id of the raw material
+ *   inventoryItemName: string,   // denormalised display name
+ *   qtyPerUnit:        number,   // qty consumed per 1 menu item sold
+ *   unit:              string,   // recipe unit ('g', 'mL', 'pcs', etc.)
+ *   baseUnit:          string,   // inventory's base unit ('kg', 'L', etc.)
+ * }
+ */
+export const recipeService = {
+  /**
+   * Calculate the maximum number of a menu item that can be made,
+   * given its recipe and the current inventory stock levels.
+   *
+   * @param {Array} recipe - the menu item's recipe array
+   * @param {Array} inventoryItems - all inventory product docs (with .id and .stock)
+   * @returns {number} available quantity (floored to integer), or Infinity if no recipe
+   */
+  calculateAvailableQty(recipe, inventoryItems) {
+    if (!recipe || recipe.length === 0) return Infinity;
+
+    let minQty = Infinity;
+    for (const ingredient of recipe) {
+      const invItem = inventoryItems.find(i => i.id === ingredient.inventoryItemId);
+      if (!invItem) return 0; // ingredient not found in inventory → can't make any
+
+      const stockInBaseUnit = invItem.stock ?? 0;
+      const qtyNeededInBaseUnit = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit);
+      if (qtyNeededInBaseUnit <= 0) continue;
+
+      const canMake = stockInBaseUnit / qtyNeededInBaseUnit;
+      minQty = Math.min(minQty, canMake);
+    }
+
+    return minQty === Infinity ? Infinity : Math.floor(minQty);
+  },
+
+  /**
+   * Deduct raw material stock for a completed order.
+   * For each recipe ingredient, subtracts (qtyPerUnit × multiplier) converted
+   * to base unit, and logs an inventory_transaction.
+   *
+   * @param {Array}  recipe       - the menu item's recipe array
+   * @param {number} multiplier   - how many of the menu item were sold (cart qty)
+   * @param {string} salesOrderId - the sales order doc id (for referenceId)
+   * @param {Array}  productDocs  - live product docs (to read current stock)
+   */
+  async deductIngredients(recipe, multiplier, salesOrderId, productDocs) {
+    if (!recipe || recipe.length === 0) return;
+
+    for (const ingredient of recipe) {
+      const prodDoc = productDocs.find(p => p.id === ingredient.inventoryItemId);
+      if (!prodDoc) continue;
+
+      const deductInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit) * multiplier;
+      const currentStock = prodDoc.stock ?? 0;
+      const newStock = Math.max(0, currentStock - deductInBase);
+
+      // Round to avoid floating-point dust (6 decimal places)
+      const rounded = Math.round(newStock * 1000000) / 1000000;
+
+      await patch('products', ingredient.inventoryItemId, { stock: rounded });
+      await insert('inventory_transactions', {
+        productId:   ingredient.inventoryItemId,
+        type:        'PRODUCTION',
+        qty:         -Math.abs(deductInBase),
+        referenceId: salesOrderId,
+      });
+    }
+  },
+
+  /**
+   * Auto-calculate the standard cost of a menu item from its recipe.
+   * Σ(ingredient.qtyPerUnit in base unit × ingredient unit cost)
+   *
+   * @param {Array} recipe - the menu item's recipe array
+   * @param {Array} inventoryItems - all inventory product docs (with .standardCost)
+   * @returns {number} total cost
+   */
+  calculateCostFromRecipe(recipe, inventoryItems) {
+    if (!recipe || recipe.length === 0) return 0;
+
+    let total = 0;
+    for (const ingredient of recipe) {
+      const invItem = inventoryItems.find(i => i.id === ingredient.inventoryItemId);
+      if (!invItem) continue;
+
+      const qtyInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit);
+      total += qtyInBase * (invItem.standardCost ?? 0);
+    }
+
+    return Math.round(total * 100) / 100; // round to 2 dp
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
