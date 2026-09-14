@@ -69,7 +69,7 @@ export default function App() {
   const renderPage = () => {
     const props = { isMobile: isNarrow };
     switch (activePage) {
-      case 'dashboard': return <DashboardPage {...props} />;
+      case 'dashboard': return <DashboardPage {...props} navigate={navigate} />;
       case 'pos':       return <POSPage {...props} />;
       case 'inventory': return <InventoryPage {...props} />;
       case 'suppliers': return <SuppliersPage {...props} />;
