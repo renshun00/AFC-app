@@ -13,8 +13,16 @@ import StaffPayrollPage from './pages/StaffPayrollPage';
 import DailyReportPage from './pages/DailyReportPage';
 import ReportsPage from './pages/ReportsPage';
 
-// All authenticated users get access to all pages
-const ALL_PAGES = ['dashboard', 'pos', 'inventory', 'menu', 'staff', 'daily', 'reports'];
+// Access control definition: non-admin staff get POS & Inventory only
+const ROLE_PERMISSIONS = {
+  Admin:      ['dashboard', 'pos', 'inventory', 'menu', 'staff', 'daily', 'reports'],
+  Supervisor: ['dashboard', 'pos', 'inventory', 'menu', 'staff', 'daily', 'reports'],
+  Cashier:    ['pos', 'inventory'],
+  Kitchen:    ['pos', 'inventory'],
+  Driver:     ['pos', 'inventory'],
+  Cleaner:    ['pos', 'inventory'],
+  Staff:      ['pos', 'inventory'],
+};
 
 export default function App() {
   const { firebaseUser, profile, loading, logout } = useAuth();
@@ -52,16 +60,18 @@ export default function App() {
     );
   }
 
-  const allowed = ALL_PAGES;
+  // ── Role-based page access ───────────────────────────────────────────────────
+  const userRole = profile.role || 'Staff';
+  const allowed = ROLE_PERMISSIONS[userRole] || ['pos', 'inventory'];
 
-  // Navigate only to pages the role can access; redirect to first allowed page
+  // Navigate only to pages the role can access
   const navigate = (p) => {
     if (allowed.includes(p)) {
       setPage(p);
     }
   };
 
-  // If current page is no longer allowed (role changed), snap to first allowed
+  // If current page is forbidden for this role, snap to the first allowed page (e.g. 'pos')
   const activePage = allowed.includes(page) ? page : allowed[0];
 
   const renderPage = () => {
@@ -88,7 +98,7 @@ export default function App() {
           onClose={() => setSidebarOpen(false)}
           isMobile={isNarrow}
           allowedPages={allowed}
-          userRole={profile.role}
+          userRole={userRole}
         />
         <main style={{
           flex: 1,
@@ -105,7 +115,7 @@ export default function App() {
             onMenuClick={() => setSidebarOpen(true)}
             onLogout={logout}
             userName={profile.name || profile.username}
-            userRole={profile.role}
+            userRole={userRole}
           />
           {renderPage()}
         </main>

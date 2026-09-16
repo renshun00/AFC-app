@@ -49,6 +49,8 @@ import {
   serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -677,6 +679,9 @@ export const productService = {
 // ── staff ─────────────────────────────────────────────────────────────────────
 // doc id = Firebase Auth UID (set when creating the user in Firebase Console)
 // { name, email, role, isActive, ... }
+// ── staff ─────────────────────────────────────────────────────────────────────
+// doc id = Firebase Auth UID (set when creating the user in Firebase Console)
+// { name, email, role, isActive, ... }
 export const staffService = {
   getAll: () => getAll('staff'),
   getById: (id) => getById('staff', id),
@@ -687,20 +692,44 @@ export const staffService = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  /** Use Firebase Auth UID as the doc id */
-  create: (uid, data) =>
-    setDoc(ref('staff', uid), {
-      ...data,
-      isActive:  true,
+  /**
+   * Creates an account in Firebase Auth without logging out the current admin,
+   * then writes the staff record to Firestore using the new Auth UID.
+   */
+  registerNewStaff: async ({ email, password, name, role, username, tasks, status }) => {
+    const secondaryAppName = 'SecondaryAuthApp';
+    const secondaryApp = getApps().find(a => a.name === secondaryAppName) 
+      || initializeApp(db.app.options, secondaryAppName);
+    
+    const secondaryAuth = getAuth(secondaryApp);
+
+    // 1. Create the user in Firebase Authentication
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const newUid = userCredential.user.uid;
+
+    // 2. Immediately sign out the secondary instance so admin stays logged in
+    await signOut(secondaryAuth);
+
+    // 3. Store the staff record in Firestore under doc ID = newUid
+    await setDoc(ref('staff', newUid), {
+      name,
+      username,
+      email,
+      role: role || 'Cashier',
+      status: status || 'active',
+      password, // retained for in-app credential view
+      tasks: tasks || [],
+      isActive: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }),
+    });
 
+    return { uid: newUid };
+  },
+
+  create: (data) => insert('staff', { ...data, isActive: true }),
   update: (id, data) => patch('staff', id, data),
-
-  deactivate: (id) =>
-    updateDoc(ref('staff', id), { isActive: false, updatedAt: serverTimestamp() }),
-
+  delete: (id) => deleteDoc(ref('staff', id)),
   updateLastLogin: (id) =>
     updateDoc(ref('staff', id), { lastLoginAt: serverTimestamp() }),
 };
