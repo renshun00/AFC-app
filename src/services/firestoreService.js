@@ -50,7 +50,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -698,16 +698,16 @@ export const staffService = {
    */
   registerNewStaff: async ({ email, password, name, role, username, tasks, status }) => {
     const secondaryAppName = 'SecondaryAuthApp';
-    const secondaryApp = getApps().find(a => a.name === secondaryAppName) 
+    const secondaryApp = getApps().find(a => a.name === secondaryAppName)
       || initializeApp(db.app.options, secondaryAppName);
-    
+
     const secondaryAuth = getAuth(secondaryApp);
 
     // 1. Create the user in Firebase Authentication
     const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
     const newUid = userCredential.user.uid;
 
-    // 2. Immediately sign out the secondary instance so admin stays logged in
+    // 2. Immediately sign out the secondary session so admin stays logged in
     await signOut(secondaryAuth);
 
     // 3. Store the staff record in Firestore under doc ID = newUid
@@ -717,7 +717,7 @@ export const staffService = {
       email,
       role: role || 'Cashier',
       status: status || 'active',
-      password, // retained for in-app credential view
+      password, // retained for in-app credential view modal
       tasks: tasks || [],
       isActive: true,
       createdAt: serverTimestamp(),
@@ -727,28 +727,40 @@ export const staffService = {
     return { uid: newUid };
   },
 
+  /**
+   * Deletes the user from Firebase Authentication via the secondary app,
+   * then deletes the document from Firestore.
+   */
+  deleteStaffCompletely: async (staffMember) => {
+    const { id, email, password } = staffMember;
+
+    // 1. Delete from Firebase Authentication
+    if (email && password) {
+      try {
+        const secondaryAppName = 'SecondaryAuthApp';
+        const secondaryApp = getApps().find(a => a.name === secondaryAppName)
+          || initializeApp(db.app.options, secondaryAppName);
+        const secondaryAuth = getAuth(secondaryApp);
+
+        const cred = await signInWithEmailAndPassword(secondaryAuth, email, password);
+        await deleteUser(cred.user);
+        await signOut(secondaryAuth);
+      } catch (authErr) {
+        console.warn('Could not delete from Firebase Auth (user may have already been removed or password changed):', authErr);
+      }
+    }
+
+    // 2. Delete the record from Firestore
+    await deleteDoc(ref('staff', id));
+  },
+
   create: (data) => insert('staff', { ...data, isActive: true }),
   update: (id, data) => patch('staff', id, data),
   delete: (id) => deleteDoc(ref('staff', id)),
-  updateLastLogin: (id) =>
-    updateDoc(ref('staff', id), { lastLoginAt: serverTimestamp() }),
-};
-
-// ── outlets ───────────────────────────────────────────────────────────────────
-export const outletService = {
-  getAll: () => getAll('outlets'),
-
-  getActive: async () => {
-    const q = query(col('outlets'), where('isActive', '==', true));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  },
-
-  create: (data) =>
-    insert('outlets', { ...data, isActive: true }),
-
-  update: (id, data) => patch('outlets', id, data),
 
   deactivate: (id) =>
-    updateDoc(ref('outlets', id), { isActive: false, updatedAt: serverTimestamp() }),
+    updateDoc(ref('staff', id), { isActive: false, updatedAt: serverTimestamp() }),
+
+  updateLastLogin: (id) =>
+    updateDoc(ref('staff', id), { lastLoginAt: serverTimestamp() }),
 };

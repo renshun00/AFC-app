@@ -25,7 +25,6 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
       setLoading(true);
       const docs = await staffService.getAll();
       if (docs && docs.length > 0) {
-        // Ensure every record has tasks array and status
         const formatted = docs.map(d => ({
           ...d,
           tasks: d.tasks || [],
@@ -34,7 +33,6 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
         }));
         setStaff(formatted);
       } else {
-        // First-time fallback if database has no staff documents yet
         setStaff(fallbackStaff);
       }
     } catch (err) {
@@ -59,7 +57,7 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
   };
   const removeTaskFromNew = (idx) => setNewStaff(f => ({ ...f, tasks: f.tasks.filter((_, i) => i !== idx) }));
 
-  // ── 2. Save new staff directly to Firestore ──────────────────────
+  // ── 2. Save new staff directly to Auth & Firestore ───────────────
   const saveNewStaff = async () => {
     setFormError('');
     if (!newStaff.name.trim()) return setFormError('Full name is required.');
@@ -75,7 +73,6 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
 
     try {
       setSaving(true);
-
       await staffService.registerNewStaff({
         email: formattedEmail,
         password: newStaff.password,
@@ -105,7 +102,7 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
   // ── 3. Edit staff tasks & save to Firestore ─────────────────────
   const [editData, setEditData] = useState(null);
   const openEditStaff = (s) => { setEditData({ ...s, tasks: s.tasks.map(t => ({ ...t })) }); setShowEdit(s.id); };
-  
+
   const saveEditStaff = async () => {
     if (!editData) return;
     try {
@@ -123,16 +120,20 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
     }
   };
 
-  // ── 4. Delete staff from Firestore ──────────────────────────────
-  const handleDeleteStaff = async (id) => {
-    if (!window.confirm('Are you sure you want to remove this staff member?')) return;
+  // ── 4. Delete staff from BOTH Firebase Auth & Firestore ──────────
+  const handleDeleteStaff = async (member) => {
+    const confirmMessage = `Are you sure you want to permanently delete ${member.name}?\n\nThis will remove their login from Firebase Auth and delete their record.`;
+    if (!window.confirm(confirmMessage)) return;
+
     try {
-      if (typeof id === 'string') {
-        await staffService.delete(id);
-      }
-      setStaff(prev => prev.filter(s => s.id !== id));
+      setLoading(true);
+      await staffService.deleteStaffCompletely(member);
+      setStaff(prev => prev.filter(s => s.id !== member.id));
     } catch (err) {
       console.error('Error deleting staff member:', err);
+      alert('Failed to delete staff: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -146,7 +147,7 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
     return (
       <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-3)' }}>
         <Loader2 size={28} className="spin" style={{ margin: '0 auto 10px', display: 'block' }} />
-        <div>Loading staff records from database...</div>
+        <div>Processing staff records...</div>
       </div>
     );
   }
@@ -221,7 +222,7 @@ export default function StaffPayrollPage({ isMobile, onStaffUpdate }) {
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}>
                   <Edit2 size={14} />
                 </button>
-                <button onClick={e => { e.stopPropagation(); handleDeleteStaff(member.id); }}
+                <button onClick={e => { e.stopPropagation(); handleDeleteStaff(member); }}
                   title="Delete staff"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 4 }}>
                   <Trash2 size={14} />

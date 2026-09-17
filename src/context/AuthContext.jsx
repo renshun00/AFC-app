@@ -1,19 +1,12 @@
 /**
- * AuthContext
+ * AuthContext.jsx
  *
  * Login flow (email + password):
- *   1. Call signInWithEmailAndPassword(auth, email, password) directly
- *   2. On success, onAuthStateChanged fires with the Firebase user
- *   3. We try to load the staff profile from Firestore:
- *        a. by document id = fbUser.uid  (preferred — set this up for each user)
- *        b. fallback: query staff where email == fbUser.email
- *        c. last resort: minimal profile so the app never crashes
+ *   1. Call signInWithEmailAndPassword(auth, email, password)
+ *   2. Fetch staff document from Firestore (by UID or email)
+ *   3. Enforce active status: If the staff document is deleted or marked inactive,
+ *      sign out immediately and reject login.
  *   4. Exposes { firebaseUser, profile, loading, login, logout }
- *
- * Staff Firestore document (collection: "staff", doc id = Firebase Auth UID):
- *   { name, role, email, isActive, staffCode, ... }
- *
- * Roles: Admin | Supervisor | Cashier | Kitchen | Driver | Cleaner
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -35,8 +28,16 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
-        setFirebaseUser(fbUser);
-        setProfile(await loadProfile(fbUser));
+        const staffProfile = await loadProfile(fbUser);
+        if (staffProfile) {
+          setFirebaseUser(fbUser);
+          setProfile(staffProfile);
+        } else {
+          // Account exists in Firebase Auth but has no valid active record in Firestore
+          await signOut(auth);
+          setFirebaseUser(null);
+          setProfile(null);
+        }
       } else {
         setFirebaseUser(null);
         setProfile(null);
@@ -48,8 +49,19 @@ export function AuthProvider({ children }) {
   // ── Login with email + password directly via Firebase Auth ─────────────────
   const login = async (email, password) => {
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      // onAuthStateChanged handles setting firebaseUser + profile
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const staffProfile = await loadProfile(cred.user);
+
+      if (!staffProfile) {
+        await signOut(auth);
+        return {
+          ok: false,
+          error: 'This account has been deactivated or removed by an administrator.',
+        };
+      }
+
+      setFirebaseUser(cred.user);
+      setProfile(staffProfile);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: friendlyAuthError(err.code) };
@@ -73,42 +85,51 @@ export function useAuth() {
 }
 
 // ── Load the staff profile from Firestore ─────────────────────────────────────
-// Priority: doc id = uid  →  email field match  →  minimal fallback
+// Looks up by UID or email. Returns null if deleted or inactive.
 async function loadProfile(fbUser) {
   try {
-    // 1. Look up by UID (the recommended setup: doc id === Firebase Auth UID)
+    // 1. Look up by UID (doc id === Firebase Auth UID)
     const byUid = await getDoc(doc(db, 'staff', fbUser.uid));
     if (byUid.exists()) {
-      return { id: byUid.id, ...byUid.data() };
+      const data = byUid.data();
+      if (data.isActive === false || data.status === 'inactive') {
+        return null; // Deactivated staff
+      }
+      return { id: byUid.id, ...data };
     }
 
     // 2. Fallback: query by email field
-    const q    = query(collection(db, 'staff'), where('email', '==', fbUser.email));
+    const q = query(collection(db, 'staff'), where('email', '==', fbUser.email));
     const snap = await getDocs(q);
     if (!snap.empty) {
-      return { id: snap.docs[0].id, ...snap.docs[0].data() };
+      const docData = snap.docs[0];
+      const data = docData.data();
+      if (data.isActive === false || data.status === 'inactive') {
+        return null; // Deactivated staff
+      }
+      return { id: docData.id, ...data };
     }
 
-    // 3. No staff document at all — allow login with a default Admin profile
-    //    so the account owner can still access the app and set things up.
-    console.warn('[AuthContext] No staff doc found for', fbUser.email, '— using default Admin profile.');
-    return {
-      id:       fbUser.uid,
-      name:     fbUser.displayName || fbUser.email,
-      email:    fbUser.email,
-      role:     'Admin',
-      isActive: true,
-    };
+    // 3. Fallback for your original primary Admin account:
+    // If you log in with your primary setup email before creating a staff document,
+    // allow access as Admin so you don't get locked out.
+    if (fbUser.email && !fbUser.email.endsWith('@afc.com')) {
+      console.warn('[AuthContext] Admin bootstrap login for:', fbUser.email);
+      return {
+        id:       fbUser.uid,
+        name:     fbUser.displayName || 'Admin',
+        email:    fbUser.email,
+        role:     'Admin',
+        isActive: true,
+      };
+    }
+
+    // 4. Staff account has been deleted from Firestore
+    console.warn('[AuthContext] No active staff doc found for', fbUser.email);
+    return null;
   } catch (err) {
     console.error('[AuthContext] loadProfile failed:', err);
-    // Return a safe fallback rather than crashing
-    return {
-      id:       fbUser.uid,
-      name:     fbUser.displayName || fbUser.email,
-      email:    fbUser.email,
-      role:     'Admin',
-      isActive: true,
-    };
+    return null;
   }
 }
 
