@@ -5,17 +5,37 @@ import { Modal, FormRow } from '../components/Layout';
 import { staffService } from '../services/firestoreService';
 import { calculateJagaGeraiPay, saveDailyPayrollToFirestore, getStaffDailySales, calculateOTPay } from '../services/payrollService';
 
-// Actual task rates from AFC Excel (PaySummStaff1)
+// Actual task rates from AFC Excel (English task definitions)
 export const AFC_TASK_RATES = {
-  'Upah Jaga Gerai': { rate: 0, unit: 'tier (ketul ayam)', isTiered: true },
-  'Basuh Ayam': { rate: 0.50, unit: 'ekor (50% share)' },
-  'Basuh Rangka': { rate: 0.50, unit: 'kg (50% share)' },
-  'Jual Cendawan': { rate: 0.50, unit: 'set' },
-  'Overtime (OT)': { rate: 3.00, unit: 'jam (>8 hrs)' },
-  'Pinjam Makan': { rate: 10.00, unit: 'claim (+RM10/hari)' },
-  'Pinjam Duit': { rate: -1.00, unit: 'RM advance (tolak)' },
-  'Pengurusan': { rate: 100.00, unit: 'hari' }
+  'Stall Duty': { rate: 0, unit: 'chicken pieces sold', isTiered: true },
+  'Wash Chicken': { rate: 0.50, unit: 'birds (50% share)' },
+  'Wash Carcass': { rate: 0.50, unit: 'kg (50% share)' },
+  'Mushroom Sales': { rate: 0.50, unit: 'sets' },
+  'Overtime (OT)': { rate: 3.00, unit: 'hours (>8 hrs)' },
+  'Meal Advance': { rate: 10.00, unit: 'claim (+RM10/day)' },
+  'Cash Advance': { rate: -1.00, unit: 'RM advance (deduction)' },
+  'Management Fee': { rate: 100.00, unit: 'day' }
 };
+
+// Normalize legacy Malay task names from Firestore to standard English
+export function normalizeTaskName(taskName) {
+  const map = {
+    'Upah Jaga Gerai': 'Stall Duty',
+    'Jaga Gerai': 'Stall Duty',
+    'Basuh Ayam': 'Wash Chicken',
+    'Basuh Rangka': 'Wash Carcass',
+    'Jual Cendawan': 'Mushroom Sales',
+    'Cendawan': 'Mushroom Sales',
+    'Elaun Makan': 'Meal Advance',
+    'Pinjam Makan': 'Meal Advance',
+    'Pinjam Duit': 'Cash Advance',
+    'Pinjam': 'Cash Advance',
+    'Pengurusan': 'Management Fee',
+    'Overtime (OT)': 'Overtime (OT)',
+    'OT': 'Overtime (OT)'
+  };
+  return map[taskName] || taskName;
+}
 
 // Helper: Calculate OT hours from "HH:MM" strings
 export function getAutoOTHours(checkInStr, checkOutStr) {
@@ -28,7 +48,7 @@ export function getAutoOTHours(checkInStr, checkOutStr) {
   if (endMins < startMins) endMins += 24 * 60; // handle overnight shifts
 
   const workedMins = endMins - startMins;
-  const otMins = Math.max(0, workedMins - 480); // 480 mins = 8 hrs standard
+  const otMins = Math.max(0, workedMins - 480); // 480 mins = 8 hrs standard shift
   return Number((otMins / 60).toFixed(2));
 }
 
@@ -40,14 +60,15 @@ export function calcStaffWage(member) {
   let deductions = 0;
 
   tasks.forEach(t => {
-    const info = AFC_TASK_RATES[t.task];
+    const taskName = normalizeTaskName(t.task);
+    const info = AFC_TASK_RATES[taskName];
     const qtyNum = Number(t.qty) || 0;
     const bonusNum = Number(t.bonus) || 0;
     let lineSubtotal = 0;
 
-    if (t.task === 'Upah Jaga Gerai') {
+    if (taskName === 'Stall Duty') {
       lineSubtotal = calculateJagaGeraiPay(qtyNum);
-    } else if (t.task === 'Pinjam Duit') {
+    } else if (taskName === 'Cash Advance') {
       deductions += Math.abs(qtyNum);
       return;
     } else if (info) {
@@ -92,7 +113,7 @@ export default function StaffPayrollPage({ isMobile }) {
       if (docs && docs.length > 0) {
         const formatted = docs.map(d => ({
           ...d,
-          tasks: d.tasks || [],
+          tasks: (d.tasks || []).map(t => ({ ...t, task: normalizeTaskName(t.task) })),
           status: d.status || (d.isActive !== false ? 'active' : 'inactive'),
           role: d.role || 'Cashier',
           checkIn: d.checkIn || '13:10',
@@ -121,7 +142,7 @@ export default function StaffPayrollPage({ isMobile }) {
   const addTaskToNew = () => {
     setNewStaff(f => ({
       ...f,
-      tasks: [...f.tasks, { ...newTask, qty: Number(newTask.qty) || 0, bonus: Number(newTask.bonus) || 0 }]
+      tasks: [...f.tasks, { ...newTask, task: normalizeTaskName(newTask.task), qty: Number(newTask.qty) || 0, bonus: Number(newTask.bonus) || 0 }]
     }));
     setNewTask({ task: Object.keys(AFC_TASK_RATES)[0], qty: '', bonus: '' });
   };
@@ -138,7 +159,6 @@ export default function StaffPayrollPage({ isMobile }) {
     if (newStaff.password !== newStaff.confirmPassword) return setFormError('Passwords do not match.');
 
     const cleanInput = newStaff.username.trim().toLowerCase();
-    // Handles plain usernames (example -> example@gmail.com) or custom emails (example@gmail.com)
     const formattedEmail = cleanInput.includes('@') ? cleanInput : `${cleanInput}@afc.com`;
     const cleanUsername = cleanInput.split('@')[0];
 
@@ -184,11 +204,11 @@ export default function StaffPayrollPage({ isMobile }) {
     setEditData(prev => {
       if (!prev) return prev;
       let updatedTasks = [...prev.tasks];
-      const otIdx = updatedTasks.findIndex(t => t.task === 'Overtime (OT)');
+      const otIdx = updatedTasks.findIndex(t => normalizeTaskName(t.task) === 'Overtime (OT)');
 
       if (otHours > 0) {
         if (otIdx >= 0) {
-          updatedTasks[otIdx] = { ...updatedTasks[otIdx], qty: otHours };
+          updatedTasks[otIdx] = { ...updatedTasks[otIdx], task: 'Overtime (OT)', qty: otHours };
         } else {
           updatedTasks.push({ task: 'Overtime (OT)', qty: otHours, bonus: 0 });
         }
@@ -210,7 +230,7 @@ export default function StaffPayrollPage({ isMobile }) {
     const defaultOut = s.checkOut || '22:10';
     const initialOT = getAutoOTHours(defaultIn, defaultOut);
 
-    let initialTasks = s.tasks.map(t => ({ ...t }));
+    let initialTasks = (s.tasks || []).map(t => ({ ...t, task: normalizeTaskName(t.task) }));
     const otIdx = initialTasks.findIndex(t => t.task === 'Overtime (OT)');
     if (initialOT > 0) {
       if (otIdx >= 0) initialTasks[otIdx] = { ...initialTasks[otIdx], qty: initialOT };
@@ -235,18 +255,18 @@ export default function StaffPayrollPage({ isMobile }) {
           if (!prev) return prev;
           let updatedTasks = [...prev.tasks];
 
-          const jagaIdx = updatedTasks.findIndex(t => t.task === 'Upah Jaga Gerai');
-          if (jagaIdx >= 0) {
-            updatedTasks[jagaIdx] = { ...updatedTasks[jagaIdx], qty: sales.ayamKetul };
+          const stallIdx = updatedTasks.findIndex(t => normalizeTaskName(t.task) === 'Stall Duty');
+          if (stallIdx >= 0) {
+            updatedTasks[stallIdx] = { ...updatedTasks[stallIdx], task: 'Stall Duty', qty: sales.ayamKetul };
           } else if (sales.ayamKetul > 0) {
-            updatedTasks.push({ task: 'Upah Jaga Gerai', qty: sales.ayamKetul, bonus: 0 });
+            updatedTasks.push({ task: 'Stall Duty', qty: sales.ayamKetul, bonus: 0 });
           }
 
-          const cendawanIdx = updatedTasks.findIndex(t => t.task === 'Jual Cendawan');
-          if (cendawanIdx >= 0) {
-            updatedTasks[cendawanIdx] = { ...updatedTasks[cendawanIdx], qty: sales.cendawanSets };
+          const mushIdx = updatedTasks.findIndex(t => normalizeTaskName(t.task) === 'Mushroom Sales');
+          if (mushIdx >= 0) {
+            updatedTasks[mushIdx] = { ...updatedTasks[mushIdx], task: 'Mushroom Sales', qty: sales.cendawanSets };
           } else if (sales.cendawanSets > 0) {
-            updatedTasks.push({ task: 'Jual Cendawan', qty: sales.cendawanSets, bonus: 0 });
+            updatedTasks.push({ task: 'Mushroom Sales', qty: sales.cendawanSets, bonus: 0 });
           }
 
           return { ...prev, tasks: updatedTasks };
@@ -266,6 +286,7 @@ export default function StaffPayrollPage({ isMobile }) {
 
       const cleanedTasks = editData.tasks.map(t => ({
         ...t,
+        task: normalizeTaskName(t.task),
         qty: Number(t.qty) || 0,
         bonus: Number(t.bonus) || 0
       }));
@@ -339,18 +360,13 @@ export default function StaffPayrollPage({ isMobile }) {
           { label: 'Total Staff', value: staff.length },
           { label: 'Total Wages Today', value: `RM${totalWages.toFixed(2)}`, highlight: true },
           { label: 'Total Bonus', value: `RM${totalBonus.toFixed(2)}` },
-          { label: 'Avg. Wage/Staff', value: `RM${staff.length ? (totalWages / staff.length).toFixed(2) : '0.00'}` },
+          { label: 'Avg. Wage / Staff', value: `RM${staff.length ? (totalWages / staff.length).toFixed(2) : '0.00'}` },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '14px 16px', background: s.highlight ? 'var(--green)' : 'var(--card)', border: s.highlight ? 'none' : '1px solid var(--border)' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: s.highlight ? 'rgba(255,255,255,.65)' : 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>{s.label}</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: s.highlight ? '#fff' : 'var(--text-1)' }}>{s.value}</div>
           </div>
         ))}
-      </div>
-
-      {/* Wage formula info */}
-      <div style={{ background: 'var(--indigo-light)', borderRadius: 'var(--radius)', border: '1px solid #dde4ff', padding: '12px 16px', marginBottom: 14, fontSize: 13 }}>
-        <strong>📐 AFC Daily Payroll Formula:</strong> Jaga Gerai (Tiered) + Basuh Ayam + Basuh Rangka + Cendawan + Auto-OT (Check In/Out) + Pinjam Makan - Pinjam Duit
       </div>
 
       {/* Toolbar */}
@@ -380,7 +396,7 @@ export default function StaffPayrollPage({ isMobile }) {
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
                     {member.username && <span style={{ fontFamily: 'monospace', background: '#f4f4f5', borderRadius: 4, padding: '1px 6px' }}>@{member.username}</span>}
-                    <span>{member.tasks?.length || 0} tasks</span>
+                    <span>{member.tasks?.length || 0} task{(member.tasks?.length || 0) !== 1 ? 's' : ''}</span>
                     {member.checkIn && member.checkOut && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--text-2)' }}>
                         <Clock size={11} /> {member.checkIn} - {member.checkOut}
@@ -391,7 +407,7 @@ export default function StaffPayrollPage({ isMobile }) {
                 <div style={{ textAlign: 'right', flexShrink: 0, marginRight: 4 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>RM{wage.total.toFixed(2)}</div>
                   {wage.bonus > 0 && <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>+RM{wage.bonus.toFixed(2)} bonus</div>}
-                  {wage.deductions > 0 && <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>-RM{wage.deductions.toFixed(2)} pinjam</div>}
+                  {wage.deductions > 0 && <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>-RM{wage.deductions.toFixed(2)} advance</div>}
                 </div>
                 {member.username && (
                   <button onClick={e => { e.stopPropagation(); setShowPwdFor(member); }}
@@ -417,25 +433,35 @@ export default function StaffPayrollPage({ isMobile }) {
               {isExpanded && (
                 <div style={{ borderTop: '1px solid var(--border)', background: '#fafafa', padding: '12px 16px' }}>
                   <table className="data-table" style={{ fontSize: 12 }}>
-                    <thead><tr><th>Task</th><th>Rate</th><th>Qty</th><th>Subtotal</th><th>Bonus</th><th>Total</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Task</th>
+                        <th>Rate</th>
+                        <th>Qty / Units</th>
+                        <th>Subtotal</th>
+                        <th>Bonus</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {(member.tasks || []).map((t, i) => {
-                        const r = AFC_TASK_RATES[t.task];
+                        const taskName = normalizeTaskName(t.task);
+                        const r = AFC_TASK_RATES[taskName];
                         const q = Number(t.qty) || 0;
                         const b = Number(t.bonus) || 0;
                         let sub = 0;
-                        if (t.task === 'Upah Jaga Gerai') {
+                        if (taskName === 'Stall Duty') {
                           sub = calculateJagaGeraiPay(q);
-                        } else if (t.task === 'Pinjam Duit') {
+                        } else if (taskName === 'Cash Advance') {
                           sub = -q;
                         } else if (r) {
                           sub = r.rate * q;
                         }
                         return (
                           <tr key={i}>
-                            <td style={{ fontWeight: 600 }}>{t.task}</td>
-                            <td style={{ color: t.task === 'Pinjam Duit' ? '#dc2626' : 'var(--text-2)' }}>
-                              {t.task === 'Upah Jaga Gerai' ? 'Tiered RM30-80' : `RM${r?.rate}/${r?.unit}`}
+                            <td style={{ fontWeight: 600 }}>{taskName}</td>
+                            <td style={{ color: taskName === 'Cash Advance' ? '#dc2626' : 'var(--text-2)' }}>
+                              {taskName === 'Stall Duty' ? 'Tiered RM30-80' : `RM${r?.rate}/${r?.unit}`}
                             </td>
                             <td>{t.qty}</td>
                             <td style={{ fontWeight: 600, color: sub < 0 ? '#dc2626' : 'inherit' }}>RM{sub.toFixed(2)}</td>
@@ -449,8 +475,8 @@ export default function StaffPayrollPage({ isMobile }) {
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', fontSize: 13 }}>
                     <span>Base: <strong>RM{wage.base.toFixed(2)}</strong></span>
                     {wage.bonus > 0 && <span>Bonus: <strong style={{ color: 'var(--green)' }}>RM{wage.bonus.toFixed(2)}</strong></span>}
-                    {wage.deductions > 0 && <span>Pinjam: <strong style={{ color: '#dc2626' }}>-RM{wage.deductions.toFixed(2)}</strong></span>}
-                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>Gaji Bersih: RM{wage.total.toFixed(2)}</span>
+                    {wage.deductions > 0 && <span>Advance: <strong style={{ color: '#dc2626' }}>-RM{wage.deductions.toFixed(2)}</strong></span>}
+                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>Net Pay: RM{wage.total.toFixed(2)}</span>
                   </div>
                 </div>
               )}
@@ -479,7 +505,7 @@ export default function StaffPayrollPage({ isMobile }) {
               <KeyRound size={12} /> ② Login Credentials
             </div>
             <FormRow label="Username or Email">
-              <input className="inp" placeholder="e.g. john or john@gmail.com" value={newStaff.username}
+              <input className="inp" placeholder="e.g. anson or anson@gmail.com" value={newStaff.username}
                 onChange={e => setNewStaff(f => ({ ...f, username: e.target.value.trim().toLowerCase().replace(/\s/g, '') }))} />
             </FormRow>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -511,7 +537,7 @@ export default function StaffPayrollPage({ isMobile }) {
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 4 }}>Qty / RM</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 4 }}>Qty / Units</label>
                 <input
                   className="inp"
                   type="number"
@@ -540,7 +566,7 @@ export default function StaffPayrollPage({ isMobile }) {
               <div style={{ marginTop: 12 }}>
                 {newStaff.tasks.map((t, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-soft)', fontSize: 12 }}>
-                    <span style={{ fontWeight: 600 }}>{t.task}</span>
+                    <span style={{ fontWeight: 600 }}>{normalizeTaskName(t.task)}</span>
                     <span style={{ color: 'var(--text-2)' }}>Qty: {t.qty || 0} + RM{t.bonus || 0}</span>
                     <button onClick={() => removeTaskFromNew(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0 4px' }}>✕</button>
                   </div>
@@ -610,11 +636,11 @@ export default function StaffPayrollPage({ isMobile }) {
           {/* Shift Check-In & Check-Out Auto OT Box */}
           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Clock size={14} /> Auto-Calculate OT from Shift Times (8 hrs standard / RM3.00 hr)
+             
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, alignItems: 'center' }}>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 2 }}>Check In (Masuk)</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 2 }}>Check In</label>
                 <input
                   className="inp"
                   type="time"
@@ -623,7 +649,7 @@ export default function StaffPayrollPage({ isMobile }) {
                 />
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 2 }}>Check Out (Pulang)</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 2 }}>Check Out</label>
                 <input
                   className="inp"
                   type="time"
@@ -651,33 +677,34 @@ export default function StaffPayrollPage({ isMobile }) {
 
           <div style={{ margin: '10px 0 14px 0' }}>
             {editData.tasks.map((t, i) => {
-              const r = AFC_TASK_RATES[t.task];
+              const taskName = normalizeTaskName(t.task);
+              const r = AFC_TASK_RATES[taskName];
               const q = t.qty === '' ? 0 : Number(t.qty) || 0;
               const b = t.bonus === '' ? 0 : Number(t.bonus) || 0;
 
               let lineSub = 0;
               let unitHint = 'Qty';
 
-              if (t.task === 'Upah Jaga Gerai') {
+              if (taskName === 'Stall Duty') {
                 lineSub = calculateJagaGeraiPay(q);
                 const ekor = Math.round(q / 9);
-                unitHint = `${ekor} ekor`;
-              } else if (t.task === 'Pinjam Duit') {
+                unitHint = `${ekor} birds`;
+              } else if (taskName === 'Cash Advance') {
                 lineSub = -q;
-                unitHint = 'RM tolak';
-              } else if (t.task === 'Basuh Ayam') {
+                unitHint = 'RM deduct';
+              } else if (taskName === 'Wash Chicken') {
                 lineSub = 0.50 * q;
-                unitHint = 'ekor';
-              } else if (t.task === 'Basuh Rangka') {
+                unitHint = 'birds';
+              } else if (taskName === 'Wash Carcass') {
                 lineSub = 0.50 * q;
                 unitHint = 'KG';
-              } else if (t.task === 'Jual Cendawan') {
+              } else if (taskName === 'Mushroom Sales') {
                 lineSub = 0.50 * q;
-                unitHint = 'set';
-              } else if (t.task === 'Overtime (OT)') {
+                unitHint = 'sets';
+              } else if (taskName === 'Overtime (OT)') {
                 lineSub = 3.00 * q;
-                unitHint = 'jam (auto)';
-              } else if (t.task === 'Pinjam Makan') {
+                unitHint = 'hrs (auto)';
+              } else if (taskName === 'Meal Advance') {
                 lineSub = 10.00 * q;
                 unitHint = 'claim';
               } else if (r) {
@@ -688,8 +715,15 @@ export default function StaffPayrollPage({ isMobile }) {
 
               return (
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1.3fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                  {/* Task Dropdown */}
-                  <select className="inp" value={t.task} onChange={e => setEditData(d => ({ ...d, tasks: d.tasks.map((tt, ii) => ii === i ? { ...tt, task: e.target.value } : tt) }))}>
+                  {/* Task Dropdown (English) */}
+                  <select
+                    className="inp"
+                    value={taskName}
+                    onChange={e => setEditData(d => ({
+                      ...d,
+                      tasks: d.tasks.map((tt, ii) => ii === i ? { ...tt, task: e.target.value } : tt)
+                    }))}
+                  >
                     {Object.keys(AFC_TASK_RATES).map(k => <option key={k}>{k}</option>)}
                   </select>
 
@@ -700,7 +734,7 @@ export default function StaffPayrollPage({ isMobile }) {
                       type="number"
                       min="0"
                       step="any"
-                      style={{ paddingRight: 55 }}
+                      style={{ paddingRight: 68 }}
                       placeholder="0"
                       value={t.qty === 0 || t.qty === '0' ? '' : t.qty}
                       onFocus={e => e.target.select()}
@@ -756,9 +790,9 @@ export default function StaffPayrollPage({ isMobile }) {
             return (
               <div style={{ background: '#f8fafc', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', padding: '10px 14px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
                 <span>Base: <strong>RM{currentWage.base.toFixed(2)}</strong></span>
-                {currentWage.bonus > 0 && <span>Bonus: <strong style={{ color: 'var(--green)' }}>+RM{currentWage.bonus.toFixed(2)}</strong></span>}
-                {currentWage.deductions > 0 && <span>Pinjam: <strong style={{ color: '#dc2626' }}>-RM{currentWage.deductions.toFixed(2)}</strong></span>}
-                <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 15 }}>Total: RM{currentWage.total.toFixed(2)}</span>
+                {currentWage.bonus > 0 && <span>Bonus: <strong style={{ color: 'var(--green)' }}>RM{currentWage.bonus.toFixed(2)}</strong></span>}
+                {currentWage.deductions > 0 && <span>Advance: <strong style={{ color: '#dc2626' }}>-RM{currentWage.deductions.toFixed(2)}</strong></span>}
+                <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 15 }}>Net Pay: RM{currentWage.total.toFixed(2)}</span>
               </div>
             );
           })()}
@@ -766,6 +800,7 @@ export default function StaffPayrollPage({ isMobile }) {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setShowEdit(null); setEditData(null); }} disabled={saving}>Cancel</button>
             <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={saveEditStaff} disabled={saving}>
+              {saving ? <Loader2 size={14} className="spin" /> : <DollarSign size={14} />}
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
