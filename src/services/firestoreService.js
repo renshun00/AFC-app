@@ -99,13 +99,13 @@ export const salesOrderService = {
    */
   create: (data) =>
     insert('sales_orders', {
-      outletId:  data.outletId,
-      staffId:   data.staffId,
-      subtotal:  data.subtotal,
-      discount:  data.discount ?? 0,
-      total:     data.total,
-      status:    data.status ?? 'completed',
-      items:     data.items ?? [],
+      outletId: data.outletId,
+      staffId: data.staffId,
+      subtotal: data.subtotal,
+      discount: data.discount ?? 0,
+      total: data.total,
+      status: data.status ?? 'completed',
+      items: data.items ?? [],
     }),
 
   getById: (id) => getById('sales_orders', id),
@@ -161,9 +161,9 @@ export const inventoryTransactionService = {
    */
   log: (data) =>
     insert('inventory_transactions', {
-      productId:   data.productId,
-      type:        data.type,
-      qty:         data.qty,
+      productId: data.productId,
+      type: data.type,
+      qty: data.qty,
       referenceId: data.referenceId ?? null,
     }),
 
@@ -171,8 +171,8 @@ export const inventoryTransactionService = {
   logProduction: (productId, qty, salesOrderId) =>
     insert('inventory_transactions', {
       productId,
-      type:        'PRODUCTION',
-      qty:         -Math.abs(qty), // always negative — stock consumed
+      type: 'PRODUCTION',
+      qty: -Math.abs(qty), // always negative — stock consumed
       referenceId: salesOrderId,
     }),
 
@@ -180,8 +180,8 @@ export const inventoryTransactionService = {
   logPurchase: (productId, qty, referenceId = null) =>
     insert('inventory_transactions', {
       productId,
-      type:        'PURCHASE',
-      qty:         Math.abs(qty), // always positive — stock added
+      type: 'PURCHASE',
+      qty: Math.abs(qty), // always positive — stock added
       referenceId,
     }),
 
@@ -189,8 +189,8 @@ export const inventoryTransactionService = {
   logWastage: (productId, qty, referenceId = null) =>
     insert('inventory_transactions', {
       productId,
-      type:        'WASTAGE',
-      qty:         -Math.abs(qty), // always negative
+      type: 'WASTAGE',
+      qty: -Math.abs(qty), // always negative
       referenceId,
     }),
 
@@ -238,7 +238,7 @@ export const staffShiftService = {
     insert('staff_shifts', {
       staffId,
       outletId,
-      clockIn:  serverTimestamp(),
+      clockIn: serverTimestamp(),
       clockOut: null,
     }),
 
@@ -296,11 +296,11 @@ export const staffTaskService = {
    */
   create: (data) =>
     insert('staff_tasks', {
-      staffId:  data.staffId,
+      staffId: data.staffId,
       taskType: data.taskType,
-      qty:      data.qty,
-      rate:     data.rate,
-      total:    data.total ?? data.qty * data.rate,
+      qty: data.qty,
+      rate: data.rate,
+      total: data.total ?? data.qty * data.rate,
     }),
 
   getByStaff: async (staffId, limitCount = 100) => {
@@ -340,8 +340,8 @@ export const expenseService = {
   create: (data) =>
     insert('expenses', {
       categoryId: data.categoryId,
-      amount:     data.amount,
-      note:       data.note ?? '',
+      amount: data.amount,
+      note: data.note ?? '',
     }),
 
   getAll: () => getAll('expenses'),
@@ -384,14 +384,14 @@ export const cashRegisterService = {
       outletId,
       openingCash,
       closingCash: null,
-      status:      'open',
+      status: 'open',
     }),
 
   /** Close a session with the final cash count. */
   close: (sessionId, closingCash) =>
     updateDoc(ref('cash_register_sessions', sessionId), {
       closingCash,
-      status:    'closed',
+      status: 'closed',
       updatedAt: serverTimestamp(),
     }),
 
@@ -401,9 +401,9 @@ export const cashRegisterService = {
   getOpenSession: async (staffId, outletId) => {
     const q = query(
       col('cash_register_sessions'),
-      where('staffId',  '==', staffId),
+      where('staffId', '==', staffId),
       where('outletId', '==', outletId),
-      where('status',   '==', 'open'),
+      where('status', '==', 'open'),
       limit(1),
     );
     const snap = await getDocs(q);
@@ -433,8 +433,8 @@ export const paymentTransactionService = {
   record: (data) =>
     insert('payment_transactions', {
       salesOrderId: data.salesOrderId,
-      method:       data.method,
-      amount:       data.amount,
+      method: data.method,
+      amount: data.amount,
     }),
 
   getBySalesOrder: async (salesOrderId) => {
@@ -480,7 +480,7 @@ export const dailySalesSummaryService = {
   upsert: (date, outletId, data) =>
     upsert('daily_sales_summary', `${date}_${outletId}`, {
       date, outletId,
-      totalSales:  data.totalSales,
+      totalSales: data.totalSales,
       totalOrders: data.totalOrders,
     }),
 
@@ -507,9 +507,9 @@ export const dailyProfitSummaryService = {
     upsert('daily_profit_summary', date, {
       date,
       revenue: data.revenue,
-      cost:    data.cost,
+      cost: data.cost,
       expense: data.expense,
-      profit:  data.profit,
+      profit: data.profit,
     }),
 
   getByDate: (date) =>
@@ -587,11 +587,11 @@ export const menuPerformanceService = {
   upsert: (date, menuItemId, data) =>
     upsert('menu_performance_summary', `${date}_${menuItemId}`, {
       date, menuItemId,
-      qtySold:  data.qtySold,
-      revenue:  data.revenue,
-      cost:     data.cost,
-      profit:   data.profit,
-      margin:   data.margin,
+      qtySold: data.qtySold,
+      revenue: data.revenue,
+      cost: data.cost,
+      profit: data.profit,
+      margin: data.margin,
     }),
 
   getByDateAndItem: (date, menuItemId) =>
@@ -685,16 +685,16 @@ export const productService = {
  * "200 mL" → 200 / 1000 = 0.2 L
  */
 const UNIT_CONVERSIONS = {
-  g:  { baseUnit: 'kg', factor: 1000 },   // 1 kg = 1000 g
-  mL: { baseUnit: 'L',  factor: 1000 },   // 1 L  = 1000 mL
+  g: { baseUnit: 'kg', factor: 1000 },   // 1 kg = 1000 g
+  mL: { baseUnit: 'L', factor: 1000 },   // 1 L  = 1000 mL
 };
 
 /** All recipe-entry units available for a given inventory base unit. */
 export const RECIPE_UNITS_FOR_BASE = {
-  kg:   ['g', 'kg'],
-  L:    ['mL', 'L'],
-  pcs:  ['pcs'],
-  box:  ['box'],
+  kg: ['g', 'kg'],
+  L: ['mL', 'L'],
+  pcs: ['pcs'],
+  box: ['box'],
   pack: ['pack'],
 };
 
@@ -788,9 +788,9 @@ export const recipeService = {
 
       await patch('products', ingredient.inventoryItemId, { stock: rounded });
       await insert('inventory_transactions', {
-        productId:   ingredient.inventoryItemId,
-        type:        'PRODUCTION',
-        qty:         -Math.abs(deductInBase),
+        productId: ingredient.inventoryItemId,
+        type: 'PRODUCTION',
+        qty: -Math.abs(deductInBase),
         referenceId: salesOrderId,
       });
     }
@@ -846,9 +846,9 @@ export const staffService = {
    */
   registerNewStaff: async ({ email, password, name, role, username, tasks, status }) => {
     const secondaryAppName = 'SecondaryAuthApp';
-    const secondaryApp = getApps().find(a => a.name === secondaryAppName) 
+    const secondaryApp = getApps().find(a => a.name === secondaryAppName)
       || initializeApp(db.app.options, secondaryAppName);
-    
+
     const secondaryAuth = getAuth(secondaryApp);
 
     // 1. Create the user in Firebase Authentication
@@ -899,4 +899,88 @@ export const outletService = {
 
   deactivate: (id) =>
     updateDoc(ref('outlets', id), { isActive: false, updatedAt: serverTimestamp() }),
+};
+
+// ── suppliers ─────────────────────────────────────────────────────────────────
+// { name, category, contact, phone, email, isActive, createdAt }
+export const supplierService = {
+  getAll: () => getAll('suppliers'),
+
+  getById: (id) => getById('suppliers', id),
+
+  getActive: async () => {
+    const q = query(col('suppliers'), where('isActive', '==', true), orderBy('name'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  create: (data) =>
+    insert('suppliers', {
+      name: data.name,
+      category: data.category ?? '',
+      contact: data.contact ?? '',
+      phone: data.phone ?? '',
+      email: data.email ?? '',
+      isActive: true,
+    }),
+
+  update: (id, data) => patch('suppliers', id, data),
+
+  deactivate: (id) =>
+    updateDoc(ref('suppliers', id), { isActive: false, updatedAt: serverTimestamp() }),
+
+  delete: (id) => deleteDoc(ref('suppliers', id)),
+};
+
+// ── supplier_purchases ────────────────────────────────────────────────────────
+// Links suppliers ↔ inventory items. One doc per purchase event.
+// { supplierId, supplierName, productId, productName, qty, unit, unitCost, totalCost, date, note, createdAt }
+export const supplierPurchaseService = {
+  create: (data) =>
+    insert('supplier_purchases', {
+      supplierId: data.supplierId,
+      supplierName: data.supplierName ?? '',
+      productId: data.productId,
+      productName: data.productName ?? '',
+      qty: data.qty,
+      unit: data.unit ?? '',
+      unitCost: data.unitCost ?? 0,
+      totalCost: data.totalCost ?? data.qty * (data.unitCost ?? 0),
+      date: data.date ?? new Date().toISOString().slice(0, 10),
+      note: data.note ?? '',
+    }),
+
+  getBySupplier: async (supplierId, limitCount = 100) => {
+    const q = query(
+      col('supplier_purchases'),
+      where('supplierId', '==', supplierId),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  getByProduct: async (productId, limitCount = 50) => {
+    const q = query(
+      col('supplier_purchases'),
+      where('productId', '==', productId),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  getRecent: async (limitCount = 50) => {
+    const q = query(
+      col('supplier_purchases'),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  delete: (id) => deleteDoc(ref('supplier_purchases', id)),
 };

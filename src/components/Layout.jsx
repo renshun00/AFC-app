@@ -2,7 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard, ShoppingCart, Package, Wrench,
   Users, BarChart2, ClipboardList, Settings,
-  FileText, X, Menu, ChevronDown, Bell, LogOut, Truck, FileSpreadsheet,
+  FileText, X, Menu, ChevronDown, Bell, LogOut, Truck,
 } from 'lucide-react';
 
 const NAV = [
@@ -13,7 +13,6 @@ const NAV = [
   { key: 'menu', label: 'Menu Engineering', icon: Wrench },
   { key: 'staff', label: 'Staff & Payroll', icon: Users },
   { key: 'reports', label: 'Reports', icon: BarChart2 },
-  { key: 'import', label: 'Excel Import', icon: FileSpreadsheet },
 ];
 
 const ROLE_COLORS = {
@@ -131,7 +130,6 @@ export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRo
     inventory: 'Inventory Management', menu: 'Menu Engineering',
     staff: 'Staff & Payroll Operations', daily: 'Daily Reconciliation',
     reports: 'Reports & Analytics', suppliers: 'Supplier Management',
-    import: 'Excel Import',
   };
   const subs = {
     dashboard: 'High-level operations summary for today.',
@@ -142,7 +140,6 @@ export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRo
     daily: 'End-of-day summary and P&L.',
     reports: 'Monthly analytics and performance.',
     suppliers: 'Track suppliers, items bought and spend.',
-    import: 'Import materials and payroll data from Excel.',
   };
   const rc = userRole ? ROLE_COLORS[userRole] : null;
 

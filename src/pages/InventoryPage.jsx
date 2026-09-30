@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
 import { Plus, Search, AlertTriangle, PackagePlus, Trash2, Pencil } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
-import { productService, inventoryTransactionService } from '../services/firestoreService';
+import { productService, inventoryTransactionService, supplierPurchaseService } from '../services/firestoreService';
 import { Modal, FormRow } from '../components/Layout';
 
 // Firestore `products` docs use different field names than this page's UI.
@@ -17,7 +17,7 @@ const fromDoc = (d) => ({
   minStock: d.minStock ?? 0,
   cost: d.standardCost ?? 0,
   category: d.categoryId ?? '',
-  supplier: d.supplier ?? '',
+  supplierId: d.supplierId ?? '',
 });
 
 const toDoc = (form) => ({
@@ -27,12 +27,12 @@ const toDoc = (form) => ({
   minStock: Number(form.minStock),
   standardCost: Number(form.cost),
   categoryId: form.category,
-  supplier: form.supplier,
+  supplierId: form.supplierId,
   isInventoryItem: true,
   showOnPos: false,
 });
 
-const emptyForm = { name:'',unit:'kg',stock:0,minStock:0,cost:0,category:'',supplier:'' };
+const emptyForm = { name:'',unit:'kg',stock:0,minStock:0,cost:0,category:'',supplierId:'' };
 
 export default function InventoryPage({ isMobile }) {
   const { data: productDocs, loading, error } = useFirestore(
@@ -42,6 +42,20 @@ export default function InventoryPage({ isMobile }) {
     orderBy('name'),
   );
   const items = productDocs.map(fromDoc);
+
+  // Subscribe to suppliers for the dropdown
+  const { data: supplierDocs } = useFirestore(
+    'suppliers',
+    where('isActive', '==', true),
+    orderBy('name'),
+  );
+
+  // Build a supplierId → name lookup
+  const supplierMap = useMemo(() => {
+    const m = {};
+    for (const s of supplierDocs) m[s.id] = s.name;
+    return m;
+  }, [supplierDocs]);
 
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -75,6 +89,19 @@ export default function InventoryPage({ isMobile }) {
       const openingStock = Number(addForm.stock);
       if (openingStock > 0) {
         await inventoryTransactionService.logPurchase(newId, openingStock);
+        // Log supplier purchase if a supplier was selected
+        if (addForm.supplierId) {
+          await supplierPurchaseService.create({
+            supplierId: addForm.supplierId,
+            supplierName: supplierMap[addForm.supplierId] ?? '',
+            productId: newId,
+            productName: addForm.name,
+            qty: openingStock,
+            unit: addForm.unit,
+            unitCost: Number(addForm.cost),
+            totalCost: openingStock * Number(addForm.cost),
+          });
+        }
       }
       setAddForm(emptyForm);
       setShowAdd(false);
@@ -88,7 +115,7 @@ export default function InventoryPage({ isMobile }) {
 
   const openEdit = (item) => {
     setSelectedItem(item);
-    setEditForm({ name:item.name, unit:item.unit, stock:item.stock, minStock:item.minStock, cost:item.cost, category:item.category, supplier:item.supplier });
+    setEditForm({ name:item.name, unit:item.unit, stock:item.stock, minStock:item.minStock, cost:item.cost, category:item.category, supplierId:item.supplierId });
     setShowEdit(true);
   };
 
@@ -201,7 +228,7 @@ export default function InventoryPage({ isMobile }) {
           { label:'Total SKUs', value: items.length },
           { label:'Low Stock', value: lowStock.length, warn: lowStock.length>0 },
           { label:'Total Value', value:`RM${items.reduce((s,i)=>s+i.stock*i.cost,0).toLocaleString('en-MY',{minimumFractionDigits:2})}` },
-          { label:'Suppliers', value: new Set(items.map(i=>i.supplier)).size },
+          { label:'Suppliers', value: new Set(items.map(i=>i.supplierId).filter(Boolean)).size },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding:'14px 16px' }}>
             <div style={{ fontSize:11,fontWeight:600,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:4 }}>{s.label}</div>
@@ -238,7 +265,7 @@ export default function InventoryPage({ isMobile }) {
                     <td style={{ color:'var(--text-3)' }}>{item.minStock} {item.unit}</td>
                     <td>RM{item.cost.toFixed(2)}</td>
                     <td style={{ fontWeight:600 }}>RM{(item.stock*item.cost).toFixed(2)}</td>
-                    <td style={{ color:'var(--text-2)' }}>{item.supplier}</td>
+                    <td style={{ color:'var(--text-2)' }}>{supplierMap[item.supplierId] || item.supplierId || '—'}</td>
                     <td><span className={`badge ${st.cls}`}>{st.label}</span></td>
                     <td>
                       <div style={{ display:'flex', gap:6 }}>
@@ -293,7 +320,10 @@ export default function InventoryPage({ isMobile }) {
               <input className="inp" type="number" min="0" step="0.01" value={addForm.cost} onChange={e=>setAddForm(f=>({...f,cost:e.target.value}))}/>
             </FormRow>
             <FormRow label="Supplier">
-              <input className="inp" placeholder="FreshFarm" value={addForm.supplier} onChange={e=>setAddForm(f=>({...f,supplier:e.target.value}))}/>
+              <select className="inp" value={addForm.supplierId} onChange={e=>setAddForm(f=>({...f,supplierId:e.target.value}))}>
+                <option value="">-- Select Supplier --</option>
+                {supplierDocs.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </FormRow>
           </div>
           <div style={{ display:'flex',gap:8,marginTop:6 }}>
@@ -330,7 +360,10 @@ export default function InventoryPage({ isMobile }) {
               <input className="inp" type="number" min="0" step="0.01" value={editForm.cost} onChange={e=>setEditForm(f=>({...f,cost:e.target.value}))}/>
             </FormRow>
             <FormRow label="Supplier">
-              <input className="inp" placeholder="FreshFarm" value={editForm.supplier} onChange={e=>setEditForm(f=>({...f,supplier:e.target.value}))}/>
+              <select className="inp" value={editForm.supplierId} onChange={e=>setEditForm(f=>({...f,supplierId:e.target.value}))}>
+                <option value="">-- Select Supplier --</option>
+                {supplierDocs.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </FormRow>
           </div>
           <div style={{ display:'flex',gap:8,marginTop:6 }}>

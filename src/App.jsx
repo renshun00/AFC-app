@@ -13,12 +13,11 @@ import StaffPayrollPage from './pages/StaffPayrollPage';
 import DailyReportPage from './pages/DailyReportPage';
 import ReportsPage from './pages/ReportsPage';
 import SuppliersPage from './pages/SuppliersPage';
-import ExcelImportPage from './pages/ExcelImportPage';
 
 // Access control definition: non-admin staff get POS & Inventory only
 const ROLE_PERMISSIONS = {
-  Admin:      ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports', 'import'],
-  Supervisor: ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports', 'import'],
+  Admin:      ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
+  Supervisor: ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
   Cashier:    ['pos', 'inventory'],
   Kitchen:    ['pos', 'inventory'],
   Driver:     ['pos', 'inventory'],
@@ -83,7 +82,7 @@ export default function App() {
       case 'pos':       return <POSPage {...props} />;
       case 'inventory': return <InventoryPage {...props} />;
       case 'suppliers': return <SuppliersPage {...props} />;
-      case 'import': return <ExcelImportPage {...props} />;
+
       case 'menu':      return <MenuEngineeringPage {...props} />;
       case 'staff':     return <StaffPayrollPage {...props} />;
       case 'daily':     return <DailyReportPage {...props} />;
