@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, TrendingUp, ImageOff, Upload, X, Link2, Package, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Edit2, Pencil, Trash2, ToggleLeft, ToggleRight, TrendingUp, ImageOff, Upload, X, Link2, Package, AlertTriangle, Tag, DollarSign, CheckCircle2 } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
 import { productService, recipeService, RECIPE_UNITS_FOR_BASE, convertToBaseUnit } from '../services/firestoreService';
 import { Modal, FormRow } from '../components/Layout';
@@ -200,12 +200,13 @@ export default function MenuEngineeringPage({ isMobile }) {
     .filter(d => d.isInventoryItem !== true)
     .map(fromDoc);
 
+  const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [activeRoster, setActiveRoster] = useState('Active Menu Roster');
 
   const [form, setForm] = useState(emptyForm);
 
@@ -213,7 +214,20 @@ export default function MenuEngineeringPage({ isMobile }) {
   const [ingredientSearch, setIngredientSearch] = useState('');
   const [showIngredientPicker, setShowIngredientPicker] = useState(false);
 
-  const margin = (item) => item.price > 0 ? (((item.price - item.cost) / item.price) * 100).toFixed(1) : '0.0';
+  // ── Dynamic cost & margin calculation based on live inventory ingredient costs ──
+  // If an item has recipe ingredients, its cost is computed dynamically from the latest
+  // inventory standardCost. If inventory cost goes up or down, this auto-adjusts immediately!
+  const getItemCost = (item) => {
+    if (item.recipe && item.recipe.length > 0) {
+      return recipeService.calculateCostFromRecipe(item.recipe, inventoryDocs);
+    }
+    return item.cost ?? 0;
+  };
+
+  const margin = (item) => {
+    const cost = getItemCost(item);
+    return item.price > 0 ? (((item.price - cost) / item.price) * 100).toFixed(1) : '0.0';
+  };
 
   // ── Available qty per menu item (computed from recipe + inventory) ─────────
   const availableQtyMap = useMemo(() => {
@@ -224,7 +238,17 @@ export default function MenuEngineeringPage({ isMobile }) {
     return map;
   }, [items, inventoryDocs]);
 
-  // ── Auto-cost from recipe ─────────────────────────────────────────────────
+  // ── Filtered menu items by search query ────────────────────────────────────
+  const filteredItems = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter(i =>
+      i.name.toLowerCase().includes(q) ||
+      (i.category && i.category.toLowerCase().includes(q))
+    );
+  }, [items, search]);
+
+  // ── Auto-cost from recipe in the Add/Edit form ──────────────────────────────
   const recipeCost = useMemo(() => {
     if (!form.recipe || form.recipe.length === 0) return 0;
     return recipeService.calculateCostFromRecipe(form.recipe, inventoryDocs);
@@ -307,7 +331,7 @@ export default function MenuEngineeringPage({ isMobile }) {
       name: item.name,
       category: item.category,
       price: item.price,
-      cost: item.cost,
+      cost: getItemCost(item),
       active: item.active,
       img: item.img ?? null,
       imgPlaceholder: item.imgPlaceholder ?? '🍽️',
@@ -348,7 +372,10 @@ export default function MenuEngineeringPage({ isMobile }) {
   // ── Derived stats ─────────────────────────────────────────────────────────
   const activeItems = items.filter(i => i.active);
   const avgMarginPct = items.length > 0
-    ? (items.reduce((s, i) => s + (i.price > 0 ? (i.price - i.cost) / i.price * 100 : 0), 0) / items.length).toFixed(1)
+    ? (items.reduce((s, i) => {
+        const cost = getItemCost(i);
+        return s + (i.price > 0 ? (i.price - cost) / i.price * 100 : 0);
+      }, 0) / items.length).toFixed(1)
     : '0.0';
 
   // ── Loading / error states ────────────────────────────────────────────────
@@ -381,15 +408,17 @@ export default function MenuEngineeringPage({ isMobile }) {
         ))}
       </div>
 
-      {/* Tabs + Add */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {['Active Menu Roster', 'Item Details'].map(tab => (
-            <button key={tab} onClick={() => setActiveRoster(tab)} className="btn btn-sm"
-              style={{ background: activeRoster === tab ? 'var(--primary)' : '#f4f4f5', color: activeRoster === tab ? '#fff' : 'var(--text-2)', border: 'none' }}>
-              {tab}
-            </button>
-          ))}
+      {/* Action Header: Search & Add Menu Item */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: isMobile ? '100%' : 360 }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+          <input
+            className="inp"
+            placeholder="Search menu items…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ paddingLeft: 32 }}
+          />
         </div>
         <button className="btn btn-primary btn-sm"
           onClick={() => { setEditItem(null); setForm(emptyForm); setShowAdd(true); }}>
@@ -416,12 +445,24 @@ export default function MenuEngineeringPage({ isMobile }) {
               </tr>
             </thead>
             <tbody>
-              {items.map(item => {
+              {filteredItems.length === 0 ? (
+                <tr>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-3)' }}>
+                    {search ? `No menu items found matching "${search}"` : 'No menu items yet.'}
+                  </td>
+                </tr>
+              ) : (
+                filteredItems.map(item => {
                 const avail = availableQtyMap[item.id];
                 const hasRecipeLink = item.recipe && item.recipe.length > 0;
                 const isLowStock = hasRecipeLink && avail !== Infinity && avail <= 5;
+                const dynamicCost = getItemCost(item);
                 return (
-                  <tr key={item.id} style={{ opacity: item.active ? 1 : 0.5 }}>
+                  <tr
+                    key={item.id}
+                    onClick={() => setSelectedItem(item)}
+                    style={{ opacity: item.active ? 1 : 0.5, cursor: 'pointer', transition: 'background .1s' }}
+                  >
                     {/* Photo cell */}
                     <td>
                       <ItemImage item={item} size={44} radius={8} />
@@ -429,7 +470,9 @@ export default function MenuEngineeringPage({ isMobile }) {
                     <td style={{ fontWeight: 600 }}>{item.name}</td>
                     <td style={{ color: 'var(--text-2)' }}>{item.category}</td>
                     <td style={{ fontWeight: 600 }}>RM{item.price.toFixed(2)}</td>
-                    <td style={{ color: 'var(--text-2)' }}>RM{item.cost.toFixed(2)}</td>
+                    <td style={{ color: 'var(--text-2)' }}>
+                      RM{dynamicCost.toFixed(2)}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <div style={{ width: 50, height: 5, borderRadius: 99, background: '#f0f0f0', overflow: 'hidden' }}>
@@ -465,12 +508,15 @@ export default function MenuEngineeringPage({ isMobile }) {
                       )}
                     </td>
                     <td>
-                      <button onClick={() => toggleActive(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: item.active ? 'var(--green)' : 'var(--text-3)' }}>
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleActive(item); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: item.active ? 'var(--green)' : 'var(--text-3)' }}
+                      >
                         {item.active ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
                       </button>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                         <button onClick={() => openEdit(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4 }}>
                           <Edit2 size={14} />
                         </button>
@@ -481,7 +527,8 @@ export default function MenuEngineeringPage({ isMobile }) {
                     </td>
                   </tr>
                 );
-              })}
+              })
+            )}
             </tbody>
           </table>
         </div>
@@ -699,6 +746,143 @@ export default function MenuEngineeringPage({ isMobile }) {
           </div>
         </Modal>
       )}
+
+      {/* ── Menu Item Detail Modal ── */}
+      {selectedItem && !showAdd && !showDeleteConfirm && (() => {
+        const avail = availableQtyMap[selectedItem.id];
+        const hasRecipeLink = selectedItem.recipe && selectedItem.recipe.length > 0;
+        const isLowStock = hasRecipeLink && avail !== Infinity && avail <= 5;
+        const currentItemCost = getItemCost(selectedItem);
+        const profitRM = (selectedItem.price - currentItemCost);
+        const marginPct = selectedItem.price > 0 ? ((profitRM / selectedItem.price) * 100).toFixed(1) : '0.0';
+
+        return (
+          <Modal title={selectedItem.name} onClose={() => setSelectedItem(null)} maxWidth={620}>
+            {/* Header / Image + Key info banner */}
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 16, padding: '12px 14px', background: '#fafbfc', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+              <ItemImage item={selectedItem} size={64} radius={10} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 600 }}>
+                    {selectedItem.category || 'General'}
+                  </span>
+                  <span className={`badge ${selectedItem.active ? 'badge-green' : 'badge-gray'}`}>
+                    {selectedItem.active ? 'Active on POS' : 'Hidden from POS'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                  Availability:{' '}
+                  {hasRecipeLink ? (
+                    <strong style={{ color: avail === 0 ? '#dc2626' : isLowStock ? '#ea580c' : 'var(--text-1)' }}>
+                      {avail === 0 ? 'Out of stock' : `${avail} portions can be made`}
+                    </strong>
+                  ) : (
+                    <span>Direct item (no recipe attached)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Financial metrics row */}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+              <div style={{ background: 'var(--main-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>Selling Price</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
+                  RM{selectedItem.price.toFixed(2)}
+                </div>
+              </div>
+              <div style={{ background: 'var(--main-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>
+                  Cost Price
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
+                  RM{currentItemCost.toFixed(2)}
+                </div>
+              </div>
+              <div style={{ background: parseFloat(marginPct) > 60 ? 'var(--green-light)' : '#fff7ed', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, color: parseFloat(marginPct) > 60 ? 'var(--green)' : '#ea580c', marginBottom: 2 }}>
+                  Profit Margin
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: parseFloat(marginPct) > 60 ? 'var(--green)' : '#ea580c' }}>
+                  {marginPct}% <span style={{ fontSize: 12, fontWeight: 600 }}> (+RM{profitRM.toFixed(2)})</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Recipe Ingredients Breakdown */}
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Package size={14} style={{ color: 'var(--primary)' }} />
+              Recipe & Ingredients Breakdown ({selectedItem.recipe?.length || 0})
+            </div>
+
+            {(!selectedItem.recipe || selectedItem.recipe.length === 0) ? (
+              <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '20px 0', textAlign: 'center', background: '#fafafa', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+                No recipe ingredients linked to this menu item yet.<br />
+                <span style={{ fontSize: 12 }}>Click "Edit Item" to link ingredients from inventory.</span>
+              </div>
+            ) : (
+              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+                <table className="data-table" style={{ margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Ingredient</th>
+                      <th style={{ textAlign: 'center' }}>Portion Needed</th>
+                      <th style={{ textAlign: 'center' }}>In Stock</th>
+                      <th style={{ textAlign: 'right' }}>Est. Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedItem.recipe.map(ing => {
+                      const invItem = inventoryDocs.find(i => i.id === ing.inventoryItemId);
+                      const qtyInBase = convertToBaseUnit(ing.qtyPerUnit, ing.unit);
+                      const unitCost = invItem?.standardCost ?? 0;
+                      const lineCost = qtyInBase * unitCost;
+                      const currentStock = invItem ? `${invItem.stock} ${invItem.uomCode ?? ''}` : 'Not found';
+
+                      return (
+                        <tr key={ing.inventoryItemId}>
+                          <td style={{ fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Link2 size={12} style={{ color: 'var(--primary)' }} />
+                              {ing.inventoryItemName || invItem?.name || ing.inventoryItemId}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                            {ing.qtyPerUnit} {ing.unit}
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--text-2)' }}>
+                            {currentStock}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                            RM{lineCost.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Actions footer */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <button className="btn btn-outline" onClick={() => setSelectedItem(null)}>
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const it = selectedItem;
+                  setSelectedItem(null);
+                  openEdit(it);
+                }}
+              >
+                <Edit2 size={13} /> Edit Menu Item
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

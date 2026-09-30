@@ -314,7 +314,7 @@ export default function SuppliersPage({ isMobile }) {
               <input className="inp" placeholder="Fresh Produce" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} />
             </FormRow>
             <FormRow label="Contact Person">
-              <input className="inp" placeholder="Ahmad Razak" value={addForm.contact} onChange={e => setAddForm(f => ({ ...f, contact: e.target.value }))} />
+              <input className="inp" placeholder="Ahmad Ali" value={addForm.contact} onChange={e => setAddForm(f => ({ ...f, contact: e.target.value }))} />
             </FormRow>
             <FormRow label="Phone">
               <input className="inp" placeholder="+60 12-345 6789" value={addForm.phone} onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))} />

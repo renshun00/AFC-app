@@ -99,12 +99,14 @@ export const salesOrderService = {
    */
   create: (data) =>
     insert('sales_orders', {
+      invoiceNumber: data.invoiceNumber ?? null,
       outletId: data.outletId,
       staffId: data.staffId,
       subtotal: data.subtotal,
       discount: data.discount ?? 0,
       total: data.total,
       status: data.status ?? 'completed',
+      paymentMethod: data.paymentMethod ?? null,
       items: data.items ?? [],
     }),
 
@@ -662,9 +664,20 @@ export const productService = {
   },
 
   create: (data) =>
-    insert('products', { ...data, isActive: data.isActive ?? true, recipe: data.recipe ?? [] }),
+    insert('products', {
+      ...data,
+      isActive: data.isActive ?? true,
+      isArchived: data.isArchived ?? false,
+      recipe: data.recipe ?? []
+    }),
 
   update: (id, data) => patch('products', id, data),
+
+  archive: (id) =>
+    updateDoc(ref('products', id), { isArchived: true, updatedAt: serverTimestamp() }),
+
+  unarchive: (id) =>
+    updateDoc(ref('products', id), { isArchived: false, updatedAt: serverTimestamp() }),
 
   deactivate: (id) =>
     updateDoc(ref('products', id), { isActive: false, updatedAt: serverTimestamp() }),

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
-import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff, AlertTriangle } from 'lucide-react';
+import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff, AlertTriangle, Receipt, FileText } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
 import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService, recipeService } from '../services/firestoreService';
 import { Modal } from '../components/Layout';
@@ -117,6 +117,22 @@ export default function POSPage({ isMobile }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  // Helper to generate or format invoice number for an order
+  const formatInvoiceNumber = (order) => {
+    if (order.invoiceNumber) return order.invoiceNumber;
+    const ts = order.createdAt?.toDate ? order.createdAt.toDate() : (order.createdAt ? new Date(order.createdAt) : new Date());
+    const ymd = ts.toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = (order.id || '').slice(-4).toUpperCase();
+    return `INV-${ymd}-${suffix}`;
+  };
+
+  // Helper to get 4-value shortened invoice number for compact display
+  const getShortInvoiceNumber = (order) => {
+    const full = formatInvoiceNumber(order);
+    return full.slice(-4).toUpperCase();
+  };
 
   // Discount state
   const [discountEnabled, setDiscountEnabled] = useState(false);
@@ -170,15 +186,23 @@ export default function POSPage({ isMobile }) {
     setSaving(true);
     try {
       // 1. Create the sales order (include recipe snapshot for reporting)
+      const now = new Date();
+      const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const randPart = Math.floor(1000 + Math.random() * 9000);
+      const generatedInvoiceNumber = `INV-${datePart}-${randPart}`;
+
       const orderId = await salesOrderService.create({
+        invoiceNumber: generatedInvoiceNumber,
         outletId: 'main_branch',
         staffId: 'pos_user',
         subtotal,
         discount: discountAmt,
         total: grandTotal,
         status: 'completed',
+        paymentMethod: payMethod || 'cash',
         items: cart.map(item => ({
           menuItemId: item.id,
+          name: item.name,
           qty: item.qty,
           price: item.price,
           recipe: item.recipe || [],
@@ -343,14 +367,41 @@ export default function POSPage({ isMobile }) {
                 const time = o.createdAt?.toDate
                   ? o.createdAt.toDate().toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' })
                   : '';
+                const shortInv = getShortInvoiceNumber(o);
                 return (
-                  <div key={o.id} style={{ flexShrink: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', minWidth: 110 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>{o.id.slice(-6).toUpperCase()}</span>
-                      <span className={`badge ${o.status === 'completed' ? 'badge-green' : 'badge-amber'}`}>{o.status}</span>
+                  <div
+                    key={o.id}
+                    onClick={() => setSelectedOrder(o)}
+                    style={{
+                      flexShrink: 0,
+                      background: '#fff',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '8px 12px',
+                      minWidth: 120,
+                      cursor: 'pointer',
+                      transition: 'all .15s ease',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = '#fefefe'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = '#fff'; }}
+                    title={`Click to view full invoice: ${formatInvoiceNumber(o)}`}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3, gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '.04em' }}>
+                        #{shortInv}
+                      </span>
+                      <span className={`badge ${o.status === 'completed' ? 'badge-green' : 'badge-amber'}`} style={{ fontSize: 10, padding: '1px 6px' }}>
+                        {o.status}
+                      </span>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{itemCount} items · RM{(o.total ?? 0).toFixed(2)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{time}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                      {itemCount} item{itemCount !== 1 ? 's' : ''} · <strong style={{ color: 'var(--primary)' }}>RM{(o.total ?? 0).toFixed(2)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
+                      <span>{time}</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 600 }}>Invoice →</span>
+                    </div>
                   </div>
                 );
               })}
@@ -616,6 +667,120 @@ export default function POSPage({ isMobile }) {
           </div>
         </Modal>
       )}
+      {/* ── Invoice Details Modal ── */}
+      {selectedOrder && (() => {
+        const invNum = formatInvoiceNumber(selectedOrder);
+        const orderDate = selectedOrder.createdAt?.toDate
+          ? selectedOrder.createdAt.toDate().toLocaleString('en-MY', {
+              year: 'numeric', month: 'short', day: 'numeric',
+              hour: '2-digit', minute: '2-digit', second: '2-digit'
+            })
+          : '—';
+        const items = Array.isArray(selectedOrder.items) ? selectedOrder.items : [];
+        const subtotalVal = selectedOrder.subtotal ?? selectedOrder.total ?? 0;
+        const discountVal = selectedOrder.discount ?? 0;
+        const totalVal = selectedOrder.total ?? 0;
+        const payMethodLabel = selectedOrder.paymentMethod
+          ? (selectedOrder.paymentMethod === 'tng' ? "Touch 'n Go eWallet" : selectedOrder.paymentMethod.toUpperCase())
+          : 'CASH';
+
+        return (
+          <Modal title={`Invoice: ${invNum}`} onClose={() => setSelectedOrder(null)} maxWidth={520}>
+            {/* Header / Meta summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              <div style={{ background: 'var(--main-bg)', padding: '10px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Invoice No</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)' }}>{invNum}</div>
+              </div>
+              <div style={{ background: 'var(--main-bg)', padding: '10px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Date & Time</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{orderDate}</div>
+              </div>
+              <div style={{ background: 'var(--main-bg)', padding: '10px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Payment Method</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>{payMethodLabel}</div>
+              </div>
+              <div style={{ background: 'var(--main-bg)', padding: '10px 12px', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Status</div>
+                <div>
+                  <span className={`badge ${selectedOrder.status === 'completed' ? 'badge-green' : 'badge-amber'}`} style={{ fontSize: 11 }}>
+                    {selectedOrder.status || 'completed'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Line items table */}
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Receipt size={14} style={{ color: 'var(--primary)' }} />
+              Purchased Items ({items.reduce((s, i) => s + (i.qty || 1), 0)})
+            </div>
+
+            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', marginBottom: 16 }}>
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th style={{ textAlign: 'center' }}>Qty</th>
+                    <th style={{ textAlign: 'right' }}>Price</th>
+                    <th style={{ textAlign: 'right' }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, idx) => {
+                    const itemName = it.name || menuItems.find(m => m.id === it.menuItemId)?.name || `Item ${idx + 1}`;
+                    const lineTotal = (it.qty || 1) * (it.price || 0);
+                    return (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: 600 }}>{itemName}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{it.qty || 1}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--text-2)' }}>RM{(it.price || 0).toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>RM{lineTotal.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Invoice summary calculations */}
+            <div style={{ background: '#fafbfc', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13, color: 'var(--text-2)' }}>
+                <span>Subtotal</span>
+                <span>RM{subtotalVal.toFixed(2)}</span>
+              </div>
+              {discountVal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13, color: '#ea580c', fontWeight: 600 }}>
+                  <span>Discount</span>
+                  <span>−RM{discountVal.toFixed(2)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                <span>Total Amount Paid</span>
+                <span style={{ color: 'var(--primary)' }}>RM{totalVal.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setSelectedOrder(null)}
+              >
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, justifyContent: 'center', gap: 6 }}
+                onClick={() => window.print()}
+              >
+                <Printer size={14} /> Print Receipt
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
