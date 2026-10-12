@@ -18,11 +18,11 @@ import SuppliersPage from './pages/SuppliersPage';
 const ROLE_PERMISSIONS = {
   Admin:      ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
   Supervisor: ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
-  Cashier:    ['pos', 'inventory'],
-  Kitchen:    ['pos', 'inventory'],
-  Driver:     ['pos', 'inventory'],
-  Cleaner:    ['pos', 'inventory'],
-  Staff:      ['pos', 'inventory'],
+  Cashier:    ['dashboard', 'pos', 'inventory'],
+  Kitchen:    ['dashboard', 'pos', 'inventory'],
+  Driver:     ['dashboard', 'pos', 'inventory'],
+  Cleaner:    ['dashboard', 'pos', 'inventory'],
+  Staff:      ['dashboard', 'pos', 'inventory'],
 };
 
 export default function App() {
@@ -78,7 +78,7 @@ export default function App() {
   const renderPage = () => {
     const props = { isMobile: isNarrow };
     switch (activePage) {
-      case 'dashboard': return <DashboardPage {...props} navigate={navigate} />;
+      case 'dashboard': return <DashboardPage {...props} navigate={navigate} userRole={userRole} />;
       case 'pos':       return <POSPage {...props} />;
       case 'inventory': return <InventoryPage {...props} />;
       case 'suppliers': return <SuppliersPage {...props} />;
@@ -87,7 +87,7 @@ export default function App() {
       case 'staff':     return <StaffPayrollPage {...props} />;
       case 'daily':     return <DailyReportPage {...props} />;
       case 'reports':   return <ReportsPage {...props} />;
-      default:          return <DashboardPage {...props} />;
+      default:          return <DashboardPage {...props} userRole={userRole} />;
     }
   };
 

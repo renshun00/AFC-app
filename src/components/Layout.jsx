@@ -1,12 +1,11 @@
-import React from 'react';
 import {
-  LayoutDashboard, ShoppingCart, Package, Wrench,
-  Users, BarChart2, ClipboardList, Settings,
-  FileText, X, Menu, ChevronDown, Bell, LogOut, Truck,
+  ClipboardList, ShoppingCart, Package, Wrench,
+  Users, BarChart2, FileText, Settings,
+  X, Menu, ChevronDown, Bell, LogOut, Truck,
 } from 'lucide-react';
 
 const NAV = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'dashboard', label: 'Daily Inventory', icon: ClipboardList },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart },
   { key: 'inventory', label: 'Inventory', icon: Package },
   { key: 'suppliers', label: 'Suppliers', icon: Truck },
@@ -126,13 +125,13 @@ export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, 
 
 export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRole }) {
   const labels = {
-    dashboard: 'Dashboard Overview', pos: 'Point of Sale',
+    dashboard: 'Daily Inventory Log', pos: 'Point of Sale',
     inventory: 'Inventory Management', menu: 'Menu Engineering',
     staff: 'Staff & Payroll Operations', daily: 'Daily Reconciliation',
     reports: 'Reports & Analytics', suppliers: 'Supplier Management',
   };
   const subs = {
-    dashboard: 'High-level operations summary for today.',
+    dashboard: 'Record daily stock levels across all categories.',
     pos: 'Manage orders and process sales.',
     inventory: 'Track stock levels and materials.',
     menu: 'Manage menu items, pricing and costs.',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+  import React, { useState } from 'react';
 import { CheckCircle, AlertCircle, Printer, Download } from 'lucide-react';
 import { dailyReportData } from '../data/placeholder';
 

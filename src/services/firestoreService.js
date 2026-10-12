@@ -997,3 +997,68 @@ export const supplierPurchaseService = {
 
   delete: (id) => deleteDoc(ref('supplier_purchases', id)),
 };
+
+// ── daily_inventory ───────────────────────────────────────────────────────────
+// doc id: "${date}"  e.g. "2026-02-01"
+// {
+//   date,                     // "YYYY-MM-DD"
+//   data: {                   // keyed by category → product → qty
+//     raw_materials: { chicken_kg: 32.1, chicken_whole: 14, ... },
+//     brought_to_stall: { ... },
+//     remaining_fried: { ... },
+//     remaining_unfried: { ... },
+//     other_remaining: { ... },
+//   },
+//   submittedBy,              // staff id or name
+//   status,                   // "draft" | "submitted"
+//   notes,                    // optional daily notes
+//   createdAt, updatedAt,
+// }
+export const dailyInventoryService = {
+  /** Save or update a day's inventory data (upsert by date). */
+  save: (date, data, submittedBy, status = 'draft', notes = '') =>
+    upsert('daily_inventory', date, {
+      date,
+      data,
+      submittedBy,
+      status,
+      notes,
+      updatedAt: serverTimestamp(),
+    }),
+
+  /** Load a specific day's inventory data. */
+  getByDate: (date) => getById('daily_inventory', date),
+
+  /** Get the most recent N entries. */
+  getRecent: async (limitCount = 30) => {
+    const q = query(
+      col('daily_inventory'),
+      orderBy('date', 'desc'),
+      limit(limitCount),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  /** Get entries in a date range. */
+  getByDateRange: async (fromDate, toDate) => {
+    const q = query(
+      col('daily_inventory'),
+      where('date', '>=', fromDate),
+      where('date', '<=', toDate),
+      orderBy('date', 'desc'),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  /** Submit (mark as final). */
+  submit: (date) =>
+    upsert('daily_inventory', date, {
+      status: 'submitted',
+      updatedAt: serverTimestamp(),
+    }),
+
+  /** Delete a day's entry. */
+  delete: (date) => deleteDoc(ref('daily_inventory', date)),
+};
