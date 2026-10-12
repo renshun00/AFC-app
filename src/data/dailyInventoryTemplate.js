@@ -1,19 +1,3 @@
-/**
- * dailyInventoryTemplate.js
- *
- * Defines the fixed product rows and categories for the daily inventory log.
- * Translated from the client's Malay data sheets:
- *
- *   BARANG MENTAH     → Raw Materials
- *   BAWA KE GERAI     → Brought to Stall
- *   BAKI DAH GORENG   → Remaining Fried (unsold fried items)
- *   BAKI BELUM GORENG → Remaining Unfried (carry-forward stock)
- *   BAKI LAIN2        → Other Remaining (sauces, sides, etc.)
- *
- * Each product row has a unique `key`, display name, and unit of measure.
- * Some products appear in multiple UoMs (e.g. Chicken: KG, Whole, Pieces).
- */
-
 // ── Category definitions ────────────────────────────────────────────────────
 export const CATEGORIES = [
   {
@@ -64,54 +48,54 @@ export const CATEGORIES = [
 
 export const CATEGORY_PRODUCTS = {
   raw_materials: [
-    { key: 'chicken_kg',        label: 'Chicken',             uom: 'KG',    uomLabel: 'kg' },
-    { key: 'chicken_whole',     label: 'Chicken',             uom: 'WHOLE', uomLabel: 'whole' },
-    { key: 'chicken_pcs',       label: 'Chicken',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'carcass_kg',        label: 'Carcass',             uom: 'KG',    uomLabel: 'kg' },
-    { key: 'carcass_pcs',       label: 'Carcass',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'neck',              label: 'Neck',                uom: 'PC',    uomLabel: 'pc' },
-    { key: 'tube_ice',          label: 'Tube Ice',            uom: 'BAG',   uomLabel: 'bag' },
-    { key: 'crushed_ice',       label: 'Crushed Ice',         uom: 'BAG',   uomLabel: 'bag' },
-    { key: 'oil_topup_packet',  label: 'Oil Top-Up (Packet)', uom: 'KG',    uomLabel: 'kg' },
-    { key: 'oil_topup_bottle',  label: 'Oil Top-Up (Bottle)', uom: 'KG',    uomLabel: 'kg' },
+    { key: 'chicken_kg', label: 'Chicken', uom: 'KG', uomLabel: 'kg' },
+    { key: 'chicken_whole', label: 'Chicken', uom: 'WHOLE', uomLabel: 'whole' },
+    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'carcass_kg', label: 'Carcass', uom: 'KG', uomLabel: 'kg' },
+    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'neck', label: 'Neck', uom: 'PC', uomLabel: 'pc' },
+    { key: 'tube_ice', label: 'Tube Ice', uom: 'BAG', uomLabel: 'bag' },
+    { key: 'crushed_ice', label: 'Crushed Ice', uom: 'BAG', uomLabel: 'bag' },
+    { key: 'oil_topup_packet', label: 'Oil Top-Up (Packet)', uom: 'KG', uomLabel: 'kg' },
+    { key: 'oil_topup_bottle', label: 'Oil Top-Up (Bottle)', uom: 'KG', uomLabel: 'kg' },
   ],
 
   brought_to_stall: [
-    { key: 'chicken_pcs',       label: 'Chicken',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'carcass_pcs',       label: 'Carcass',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'chicken_neck_set',  label: 'Chicken Neck (4 pcs)',uom: 'SET',   uomLabel: 'set' },
-    { key: 'mushroom',          label: 'Mushroom',            uom: 'SET',   uomLabel: 'set' },
-    { key: 'butter_rice',       label: 'Butter Rice',         uom: 'SET',   uomLabel: 'set' },
-    { key: 'skin',              label: 'Skin',                uom: 'PC',    uomLabel: 'pc' },
-    { key: 'cheese_sauce',      label: 'Cheese Sauce',        uom: 'PC',    uomLabel: 'pc' },
-    { key: 'korean_sauce',      label: 'Korean Sauce',        uom: 'PC',    uomLabel: 'pc' },
-    { key: 'green_sauce',       label: 'Green Sauce',         uom: 'PC',    uomLabel: 'pc' },
-    { key: 'bbq_sauce',         label: 'BBQ Sauce',           uom: 'PC',    uomLabel: 'pc' },
-    { key: 'korean_bbq_sauce',  label: 'Korean BBQ Sauce',    uom: 'PC',    uomLabel: 'pc' },
+    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set' },
+    { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
+    { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
+    { key: 'skin', label: 'Skin', uom: 'PC', uomLabel: 'pc' },
+    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
   ],
 
   remaining_fried: [
-    { key: 'chicken_pcs',       label: 'Chicken',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'carcass_pcs',       label: 'Carcass',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'neck',              label: 'Neck',                uom: 'SET',   uomLabel: 'set' },
-    { key: 'mushroom',          label: 'Mushroom',            uom: 'SET',   uomLabel: 'set' },
+    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'neck', label: 'Neck', uom: 'SET', uomLabel: 'set' },
+    { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
   ],
 
   remaining_unfried: [
-    { key: 'chicken_pcs',       label: 'Chicken',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'carcass_pcs',       label: 'Carcass',             uom: 'PCS',   uomLabel: 'pcs' },
-    { key: 'neck',              label: 'Neck',                uom: 'SET',   uomLabel: 'set' },
-    { key: 'mushroom',          label: 'Mushroom',            uom: 'SET',   uomLabel: 'set' },
+    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'neck', label: 'Neck', uom: 'SET', uomLabel: 'set' },
+    { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
   ],
 
   other_remaining: [
-    { key: 'butter_rice',       label: 'Butter Rice',         uom: 'SET',   uomLabel: 'set' },
-    { key: 'skin',              label: 'Skin',                uom: 'PC',    uomLabel: 'pc' },
-    { key: 'cheese_sauce',      label: 'Cheese Sauce',        uom: 'PC',    uomLabel: 'pc' },
-    { key: 'korean_sauce',      label: 'Korean Sauce',        uom: 'PC',    uomLabel: 'pc' },
-    { key: 'green_sauce',       label: 'Green Sauce',         uom: 'PC',    uomLabel: 'pc' },
-    { key: 'bbq_sauce',         label: 'BBQ Sauce',           uom: 'PC',    uomLabel: 'pc' },
-    { key: 'korean_bbq_sauce',  label: 'Korean BBQ Sauce',    uom: 'PC',    uomLabel: 'pc' },
+    { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
+    { key: 'skin', label: 'Skin', uom: 'PC', uomLabel: 'pc' },
+    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
   ],
 };
 

@@ -80,7 +80,7 @@ export default function App() {
     switch (activePage) {
       case 'dashboard': return <DashboardPage {...props} navigate={navigate} userRole={userRole} />;
       case 'pos':       return <POSPage {...props} />;
-      case 'inventory': return <InventoryPage {...props} />;
+      case 'inventory': return <InventoryPage {...props} userRole={userRole} />;
       case 'suppliers': return <SuppliersPage {...props} />;
 
       case 'menu':      return <MenuEngineeringPage {...props} />;

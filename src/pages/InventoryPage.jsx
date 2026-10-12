@@ -36,7 +36,9 @@ const toDoc = (form) => ({
 
 const emptyForm = { name:'',unit:'kg',stock:0,minStock:0,cost:0,category:'',supplierId:'',isArchived:false };
 
-export default function InventoryPage({ isMobile }) {
+export default function InventoryPage({ isMobile, userRole }) {
+  // Only Admin/Supervisor may purchase or add new stock
+  const isAdmin = userRole === 'Admin' || userRole === 'Supervisor';
   const { data: productDocs, loading, error } = useFirestore(
     'products',
     where('isInventoryItem', '==', true),
@@ -347,16 +349,20 @@ export default function InventoryPage({ isMobile }) {
         <button className="btn btn-outline" onClick={() => setShowWastage(true)}>
           <Trash2 size={14} /> Log Wastage
         </button>
-        <button
-          className="btn btn-outline"
-          onClick={() => openPurchaseModal()}
-          style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}
-        >
-          <ShoppingCart size={14} /> Purchase Stock
-        </button>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-          <Plus size={14} /> Add New Stock
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              className="btn btn-outline"
+              onClick={() => openPurchaseModal()}
+              style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}
+            >
+              <ShoppingCart size={14} /> Purchase Stock
+            </button>
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+              <Plus size={14} /> Add New Stock
+            </button>
+          </>
+        )}
       </div>
 
       {/* Tabs: Active vs Archived Inventory */}
@@ -907,7 +913,7 @@ export default function InventoryPage({ isMobile }) {
                 </button>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                {!selectedItem.isArchived && (
+                {isAdmin && !selectedItem.isArchived && (
                   <button
                     className="btn btn-outline"
                     onClick={() => {

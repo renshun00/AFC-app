@@ -12,6 +12,7 @@ import {
   buildEmptyDayData,
 } from '../data/dailyInventoryTemplate';
 import { useAuth } from '../context/AuthContext';
+import { getFriedAndSoldQuantities } from '../utils/dailyFlowCalculator';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -425,6 +426,14 @@ export default function StaffDashboardPage({ isMobile }) {
     return { rawTotal, stallTotal, friedTotal, unfriedTotal, otherTotal };
   }, [formData]);
 
+  // ─── Fried / Sold reconciliation (Excel ProductInventory logic) ────────
+  const friedAndSold = useMemo(
+    () => getFriedAndSoldQuantities(formData),
+    [formData]
+  );
+  const chickenSoldToday = friedAndSold.sold.chicken_pcs || 0;
+  const carcassSoldToday = friedAndSold.sold.carcass_pcs || 0;
+
   // ─── Render ────────────────────────────────────────────────────────────
   return (
     <div>
@@ -516,7 +525,7 @@ export default function StaffDashboardPage({ isMobile }) {
       {/* ──── Summary Cards ──── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)',
+        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)',
         gap: 10, marginBottom: 20,
       }}>
         <SummaryCard
@@ -534,6 +543,14 @@ export default function StaffDashboardPage({ isMobile }) {
         <SummaryCard
           label="Left Unfried" value={summaryStats.unfriedTotal.toFixed(1)} icon={PackageOpen}
           color="#f59e0b" sub="Carry over" loading={loading}
+        />
+        <SummaryCard
+          label="Chicken Sold" value={chickenSoldToday.toFixed(1)} icon={CheckCircle2}
+          color="#16a34a" sub="Pcs today" loading={loading}
+        />
+        <SummaryCard
+          label="Carcass Sold" value={carcassSoldToday.toFixed(1)} icon={CheckCircle2}
+          color="#16a34a" sub="Pcs today" loading={loading}
         />
         <SummaryCard
           label="Other Left" value={summaryStats.otherTotal.toFixed(1)} icon={MoreHorizontal}
