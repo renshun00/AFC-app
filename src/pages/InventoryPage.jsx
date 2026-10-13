@@ -426,7 +426,7 @@ export default function InventoryPage({ isMobile, userRole }) {
                 <th>Value</th>
                 <th>Supplier</th>
                 <th>Status</th>
-                <th>Actions</th>
+                {isAdmin && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -467,52 +467,54 @@ export default function InventoryPage({ isMobile, userRole }) {
                     <td style={{ fontWeight: 600 }}>RM{(item.stock * item.cost).toFixed(2)}</td>
                     <td style={{ color: 'var(--text-2)' }}>{supplierMap[item.supplierId] || item.supplierId || '—'}</td>
                     <td><span className={`badge ${st.cls}`}>{st.label}</span></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                        {!item.isArchived && (
+                    {isAdmin && (
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                          {!item.isArchived && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => openPurchaseModal(item)}
+                              title="Purchase / Restock Stock"
+                              style={{ padding: 6, color: 'var(--primary)' }}
+                            >
+                              <ShoppingCart size={14} />
+                            </button>
+                          )}
                           <button
                             className="btn btn-ghost btn-sm"
-                            onClick={() => openPurchaseModal(item)}
-                            title="Purchase / Restock Stock"
-                            style={{ padding: 6, color: 'var(--primary)' }}
+                            onClick={() => openEdit(item)}
+                            aria-label={`Edit ${item.name}`}
+                            title="Edit Details"
+                            style={{ padding: 6 }}
                           >
-                            <ShoppingCart size={14} />
+                            <Pencil size={14} />
                           </button>
-                        )}
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => openEdit(item)}
-                          aria-label={`Edit ${item.name}`}
-                          title="Edit Details"
-                          style={{ padding: 6 }}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={(e) => handleToggleArchive(item, e)}
-                          title={item.isArchived ? 'Unarchive (Restore to active list)' : 'Archive Inventory (Hide and mute alerts)'}
-                          style={{ padding: 6, color: item.isArchived ? 'var(--green)' : 'var(--text-3)' }}
-                        >
-                          {item.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => openDeleteConfirm(item)}
-                          aria-label={`Delete ${item.name}`}
-                          title="Delete Permanently"
-                          style={{ padding: 6, color: '#dc2626' }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={(e) => handleToggleArchive(item, e)}
+                            title={item.isArchived ? 'Unarchive (Restore to active list)' : 'Archive Inventory (Hide and mute alerts)'}
+                            style={{ padding: 6, color: item.isArchived ? 'var(--green)' : 'var(--text-3)' }}
+                          >
+                            {item.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openDeleteConfirm(item)}
+                            aria-label={`Delete ${item.name}`}
+                            title="Delete Permanently"
+                            style={{ padding: 6, color: '#dc2626' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
               {displayedItems.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-3)', padding: '28px 0' }}>
+                  <td colSpan={isAdmin ? 9 : 8} style={{ textAlign: 'center', color: 'var(--text-3)', padding: '28px 0' }}>
                     {activeTab === 'archived'
                       ? 'No archived inventory items.'
                       : (search ? 'No inventory items match your search.' : 'No active inventory items yet.')}
@@ -929,9 +931,11 @@ export default function InventoryPage({ isMobile, userRole }) {
                 <button className="btn btn-outline" onClick={() => setSelectedItem(null)}>
                   Close
                 </button>
-                <button className="btn btn-primary" onClick={() => openEdit(selectedItem)}>
-                  <Pencil size={13} /> Edit Item
-                </button>
+                {isAdmin && (
+                  <button className="btn btn-primary" onClick={() => openEdit(selectedItem)}>
+                    <Pencil size={13} /> Edit Item
+                  </button>
+                )}
               </div>
             </div>
           </Modal>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, ChevronDown, ChevronUp, DollarSign, Users, Eye, EyeOff, KeyRound, Loader2, Trash2, Clock } from 'lucide-react';
+import { Plus, Edit2, ChevronDown, ChevronUp, DollarSign, Users, Eye, EyeOff, KeyRound, Loader2, Trash2, Clock, LogIn, LogOut } from 'lucide-react';
 import { staffList as fallbackStaff } from '../data/placeholder';
 import { Modal, FormRow } from '../components/Layout';
-import { staffService } from '../services/firestoreService';
+import { staffService, staffShiftService } from '../services/firestoreService';
 import { calculateJagaGeraiPay, saveDailyPayrollToFirestore, getStaffDailySales, calculateOTPay } from '../services/payrollService';
 
 // Actual task rates from AFC Excel (English task definitions)
@@ -97,7 +97,7 @@ export default function StaffPayrollPage({ isMobile }) {
   const [showEdit, setShowEdit] = useState(null);
   const [showPwdFor, setShowPwdFor] = useState(null);
 
-  const emptyNew = { name: '', role: 'Cashier', status: 'active', tasks: [], username: '', password: '', confirmPassword: '' };
+  const emptyNew = { name: '', role: 'Staff', status: 'active', tasks: [], username: '', password: '', confirmPassword: '' };
   const [newStaff, setNewStaff] = useState(emptyNew);
   const [newTask, setNewTask] = useState({ task: Object.keys(AFC_TASK_RATES)[0], qty: '', bonus: '' });
   const [showPwd, setShowPwd] = useState(false);
@@ -105,20 +105,47 @@ export default function StaffPayrollPage({ isMobile }) {
   const [saving, setSaving] = useState(false);
   const [fetchingSales, setFetchingSales] = useState(false);
 
-  // ── 1. Load staff from Firestore ─────────────────────────────────
+  const [shiftsToday, setShiftsToday] = useState({});
+
+  // ── 1. Load staff and today's attendance shifts from Firestore ───
   const loadStaffData = async () => {
     try {
       setLoading(true);
-      const docs = await staffService.getAll();
+      const today = new Date().toISOString().slice(0, 10);
+      
+      const [docs, shifts] = await Promise.all([
+        staffService.getAll(),
+        staffShiftService.getAllShiftsForDate(today).catch(e => {
+          console.warn('Could not fetch shifts:', e);
+          return [];
+        })
+      ]);
+
+      // Map shifts by staffId
+      const shiftMap = {};
+      (shifts || []).forEach(s => {
+        if (!shiftMap[s.staffId]) {
+          shiftMap[s.staffId] = s;
+        }
+      });
+      setShiftsToday(shiftMap);
+
       if (docs && docs.length > 0) {
-        const formatted = docs.map(d => ({
-          ...d,
-          tasks: (d.tasks || []).map(t => ({ ...t, task: normalizeTaskName(t.task) })),
-          status: d.status || (d.isActive !== false ? 'active' : 'inactive'),
-          role: d.role || 'Cashier',
-          checkIn: d.checkIn || '13:10',
-          checkOut: d.checkOut || '22:10'
-        }));
+        const formatted = docs.map(d => {
+          const shift = shiftMap[d.id];
+          const actualIn = shift?.clockIn?.toDate ? shift.clockIn.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null;
+          const actualOut = shift?.clockOut?.toDate ? shift.clockOut.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null;
+
+          return {
+            ...d,
+            tasks: (d.tasks || []).map(t => ({ ...t, task: normalizeTaskName(t.task) })),
+            status: d.status || (d.isActive !== false ? 'active' : 'inactive'),
+            role: d.role === 'Admin' ? 'Admin' : 'Staff',
+            checkIn: actualIn || d.checkIn || '13:10',
+            checkOut: actualOut || d.checkOut || '22:10',
+            actualShift: shift,
+          };
+        });
         setStaff(formatted);
       } else {
         setStaff(fallbackStaff);
@@ -291,9 +318,12 @@ export default function StaffPayrollPage({ isMobile }) {
         bonus: Number(t.bonus) || 0
       }));
 
-      // 1. Update staff profile with checkIn and checkOut
+      // 1. Update staff profile with name, role, checkIn and checkOut
+      const updatedRole = editData.role === 'Admin' ? 'Admin' : 'Staff';
       if (typeof editData.id === 'string') {
         await staffService.update(editData.id, {
+          name: editData.name.trim(),
+          role: updatedRole,
           tasks: cleanedTasks,
           checkIn: editData.checkIn,
           checkOut: editData.checkOut
@@ -314,7 +344,7 @@ export default function StaffPayrollPage({ isMobile }) {
         totalPay: wageCalc.total
       });
 
-      setStaff(prev => prev.map(s => s.id === editData.id ? { ...editData, tasks: cleanedTasks } : s));
+      setStaff(prev => prev.map(s => s.id === editData.id ? { ...editData, name: editData.name.trim(), role: updatedRole, tasks: cleanedTasks } : s));
       setShowEdit(null);
       setEditData(null);
     } catch (err) {
@@ -339,8 +369,7 @@ export default function StaffPayrollPage({ isMobile }) {
   };
 
   const roleBadge = (role) => {
-    const map = { Admin: 'badge-red', Supervisor: 'badge-amber', Cashier: 'badge-blue', Kitchen: 'badge-green', Driver: 'badge-gray', Cleaner: 'badge-gray' };
-    return map[role] || 'badge-gray';
+    return role === 'Admin' ? 'badge-red' : 'badge-blue';
   };
 
   if (loading) {
@@ -394,14 +423,28 @@ export default function StaffPayrollPage({ isMobile }) {
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{member.name}</div>
                     <span className={`badge ${roleBadge(member.role)}`} style={{ fontSize: 10 }}>{member.role}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     {member.username && <span style={{ fontFamily: 'monospace', background: '#f4f4f5', borderRadius: 4, padding: '1px 6px' }}>@{member.username}</span>}
                     <span>{member.tasks?.length || 0} task{(member.tasks?.length || 0) !== 1 ? 's' : ''}</span>
-                    {member.checkIn && member.checkOut && (
+                    {member.actualShift ? (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '2px 7px', borderRadius: 6,
+                        background: member.actualShift.clockOut ? '#f4f4f5' : '#dcfce7',
+                        color: member.actualShift.clockOut ? 'var(--text-2)' : '#15803d',
+                        fontWeight: 600, fontSize: 11
+                      }}>
+                        <Clock size={11} />
+                        {member.actualShift.clockIn?.toDate ? member.actualShift.clockIn.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : member.checkIn}
+                        {member.actualShift.clockOut ? (
+                          ` → ${member.actualShift.clockOut.toDate ? member.actualShift.clockOut.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : member.checkOut}`
+                        ) : ' (On Duty)'}
+                      </span>
+                    ) : member.checkIn && member.checkOut ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--text-2)' }}>
                         <Clock size={11} /> {member.checkIn} - {member.checkOut}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0, marginRight: 4 }}>
@@ -495,7 +538,8 @@ export default function StaffPayrollPage({ isMobile }) {
             </FormRow>
             <FormRow label="Role">
               <select className="inp" value={newStaff.role} onChange={e => setNewStaff(f => ({ ...f, role: e.target.value }))}>
-                {['Cashier', 'Kitchen', 'Supervisor', 'Driver', 'Cleaner'].map(r => <option key={r}>{r}</option>)}
+                <option value="Staff">Staff</option>
+                <option value="Admin">Admin</option>
               </select>
             </FormRow>
           </div>
@@ -626,18 +670,35 @@ export default function StaffPayrollPage({ isMobile }) {
 
       {/* ── Edit Staff Modal with Auto-OT Shift Times ── */}
       {showEdit && editData && (
-        <Modal title={`Edit Tasks & Shift — ${editData.name}`} onClose={() => { setShowEdit(null); setEditData(null); }} maxWidth={640}>
+        <Modal title={`Edit Staff & Shift — ${editData.name}`} onClose={() => { setShowEdit(null); setEditData(null); }} maxWidth={640}>
           {fetchingSales && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--primary)', marginBottom: 10 }}>
               <Loader2 size={13} className="spin" /> Syncing today's POS chicken & mushroom sales from database...
             </div>
           )}
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <FormRow label="Staff Name">
+              <input
+                className="inp"
+                value={editData.name}
+                onChange={e => setEditData(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </FormRow>
+            <FormRow label="Role">
+              <select
+                className="inp"
+                value={editData.role === 'Admin' ? 'Admin' : 'Staff'}
+                onChange={e => setEditData(prev => ({ ...prev, role: e.target.value }))}
+              >
+                <option value="Staff">Staff</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </FormRow>
+          </div>
+
           {/* Shift Check-In & Check-Out Auto OT Box */}
           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-             
-            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, alignItems: 'center' }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 2 }}>Check In</label>

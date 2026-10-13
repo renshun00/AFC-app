@@ -286,6 +286,38 @@ export const staffShiftService = {
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
+
+  /** Get most recent shift for a staff today (by date YYYY-MM-DD or start of day) */
+  getTodayShift: async (staffId, dateStr) => {
+    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
+    const startOfDay = new Date(`${targetDate}T00:00:00`);
+    const endOfDay = new Date(`${targetDate}T23:59:59.999`);
+    const q = query(
+      col('staff_shifts'),
+      where('staffId', '==', staffId),
+      where('clockIn', '>=', Timestamp.fromDate(startOfDay)),
+      where('clockIn', '<=', Timestamp.fromDate(endOfDay)),
+      orderBy('clockIn', 'desc'),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+  },
+
+  /** Get all shifts for all staff on a specific date (YYYY-MM-DD) */
+  getAllShiftsForDate: async (dateStr) => {
+    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
+    const startOfDay = new Date(`${targetDate}T00:00:00`);
+    const endOfDay = new Date(`${targetDate}T23:59:59.999`);
+    const q = query(
+      col('staff_shifts'),
+      where('clockIn', '>=', Timestamp.fromDate(startOfDay)),
+      where('clockIn', '<=', Timestamp.fromDate(endOfDay)),
+      orderBy('clockIn', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
 };
 
 // ── staff_tasks ───────────────────────────────────────────────────────────────

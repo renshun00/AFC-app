@@ -4,8 +4,9 @@ import {
   CalendarDays, Save, Send, ChevronDown, ChevronRight,
   Loader, CheckCircle2, AlertCircle, Clock, ArrowRight,
   ArrowLeft, ClipboardList, FileDown, History,
+  LogIn, LogOut, KeyRound, Eye, EyeOff, Lock, Check,
 } from 'lucide-react';
-import { dailyInventoryService } from '../services/firestoreService';
+import { dailyInventoryService, staffShiftService, staffService } from '../services/firestoreService';
 import {
   CATEGORIES,
   CATEGORY_PRODUCTS,
@@ -13,6 +14,8 @@ import {
 } from '../data/dailyInventoryTemplate';
 import { useAuth } from '../context/AuthContext';
 import { getFriedAndSoldQuantities } from '../utils/dailyFlowCalculator';
+import { auth } from '../firebase';
+import { signInWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -277,6 +280,127 @@ export default function StaffDashboardPage({ isMobile }) {
   const isToday = selectedDate === todayStr();
   const isSubmitted = status === 'submitted';
 
+  // ─── Attendance / Shift State ──────────────────────────────────────────
+  const [activeShift, setActiveShift] = useState(null);
+  const [shiftLoading, setShiftLoading] = useState(true);
+  const [attendanceModal, setAttendanceModal] = useState(null); // 'checkIn' | 'checkOut' | null
+  const [verifyPassword, setVerifyPassword] = useState('');
+  const [showVerifyPassword, setShowVerifyPassword] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [attendanceMsg, setAttendanceMsg] = useState(null);
+
+  // Load staff member's shift for today
+  const loadStaffShift = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      setShiftLoading(true);
+      // First check if there is an active open shift
+      const active = await staffShiftService.getActiveShift(profile.id);
+      if (active) {
+        setActiveShift(active);
+      } else {
+        // Check if there is already a completed or past shift today
+        const todayShift = await staffShiftService.getTodayShift(profile.id);
+        setActiveShift(todayShift);
+      }
+    } catch (err) {
+      console.warn('[StaffDashboardPage] error loading shift:', err);
+    } finally {
+      setShiftLoading(false);
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    loadStaffShift();
+  }, [loadStaffShift]);
+
+  // Execute Check In / Check Out after password verification
+  const handleConfirmAttendance = async (e) => {
+    if (e) e.preventDefault();
+    if (!verifyPassword) {
+      setVerifyError('Please enter your password.');
+      return;
+    }
+    setVerifying(true);
+    setVerifyError('');
+
+    try {
+      const email = auth.currentUser?.email || profile?.email;
+      let authenticated = false;
+
+      // 1. Try Firebase Auth reauthentication / signIn
+      if (auth.currentUser && email) {
+        try {
+          const cred = EmailAuthProvider.credential(email, verifyPassword);
+          await reauthenticateWithCredential(auth.currentUser, cred);
+          authenticated = true;
+        } catch (authErr) {
+          try {
+            await signInWithEmailAndPassword(auth, email, verifyPassword);
+            authenticated = true;
+          } catch (innerErr) {
+            console.warn('[Auth recheck] standard auth failed, checking Firestore record...');
+          }
+        }
+      }
+
+      // 2. Fallback check against staff record in Firestore (e.g. if created via admin manager)
+      if (!authenticated && profile?.id) {
+        const staffDoc = await staffService.getById(profile.id);
+        if (staffDoc && staffDoc.password && staffDoc.password === verifyPassword) {
+          authenticated = true;
+        }
+      }
+
+      if (!authenticated) {
+        setVerifyError('Incorrect password. Please re-enter your account password.');
+        setVerifying(false);
+        return;
+      }
+
+      // Format current time HH:MM
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      if (attendanceModal === 'checkIn') {
+        const shiftId = await staffShiftService.clockIn(profile.id, profile.outletId || 'outlet-1');
+        
+        // Also update staff profile's checkIn
+        await staffService.update(profile.id, { checkIn: timeStr });
+
+        setAttendanceMsg({ type: 'success', text: `Checked in successfully at ${timeStr}!` });
+      } else if (attendanceModal === 'checkOut') {
+        if (activeShift?.id) {
+          await staffShiftService.clockOut(activeShift.id);
+        } else {
+          // If no open shift doc was tracked, clock in & immediately close
+          const newId = await staffShiftService.clockIn(profile.id, profile.outletId || 'outlet-1');
+          await staffShiftService.clockOut(newId);
+        }
+
+        // Also update staff profile's checkOut
+        await staffService.update(profile.id, { checkOut: timeStr });
+
+        setAttendanceMsg({ type: 'success', text: `Checked out successfully at ${timeStr}!` });
+      }
+
+      // Refresh shift data
+      await loadStaffShift();
+
+      // Reset modal state
+      setAttendanceModal(null);
+      setVerifyPassword('');
+      setShowVerifyPassword(false);
+      setTimeout(() => setAttendanceMsg(null), 5000);
+    } catch (err) {
+      console.error('[Attendance] error:', err);
+      setVerifyError('Failed to process: ' + (err.message || 'Unknown error'));
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   // ─── Load recent entries ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -435,8 +559,290 @@ export default function StaffDashboardPage({ isMobile }) {
   const carcassSoldToday = friedAndSold.sold.carcass_pcs || 0;
 
   // ─── Render ────────────────────────────────────────────────────────────
+  // Format check in / out times for display
+  const clockInDisplay = activeShift?.clockIn?.toDate
+    ? activeShift.clockIn.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : (profile?.checkIn || null);
+  const clockOutDisplay = activeShift?.clockOut?.toDate
+    ? activeShift.clockOut.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : null;
+  const isShiftOpen = activeShift && !activeShift.clockOut;
+
   return (
     <div>
+      {/* ──── Top Staff Attendance (Check In / Check Out) Banner ──── */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 'var(--radius)',
+        border: '1px solid var(--border)',
+        padding: '16px 20px',
+        marginBottom: 20,
+        boxShadow: 'var(--shadow-sm)',
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12,
+            background: isShiftOpen ? 'var(--green-light)' : 'var(--primary-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: isShiftOpen ? '#15803d' : 'var(--primary)',
+            flexShrink: 0
+          }}>
+            <Clock size={22} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+                {profile?.name || 'Staff Member'}
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: isShiftOpen ? '#dcfce7' : '#f4f4f5',
+                color: isShiftOpen ? '#15803d' : '#71717a'
+              }}>
+                {isShiftOpen ? '● On Duty' : '○ Not Clocked In'}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span>Shift: <strong>{clockInDisplay || 'Not checked in'}</strong> {clockOutDisplay ? `→ ${clockOutDisplay}` : (isShiftOpen ? '→ Active' : '')}</span>
+              {isShiftOpen && activeShift?.clockIn?.toDate && (
+                <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                  (Started {activeShift.clockIn.toDate().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })})
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={isShiftOpen || shiftLoading}
+            onClick={() => {
+              setAttendanceModal('checkIn');
+              setVerifyPassword('');
+              setVerifyError('');
+              setShowVerifyPassword(false);
+            }}
+            style={{
+              background: isShiftOpen ? '#f4f4f5' : '#16a34a',
+              color: isShiftOpen ? '#a1a1aa' : '#fff',
+              border: 'none',
+              padding: '10px 18px',
+              fontWeight: 700,
+              fontSize: 13,
+              borderRadius: 'var(--radius-sm)',
+              cursor: isShiftOpen ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              boxShadow: isShiftOpen ? 'none' : '0 2px 6px rgba(22, 163, 74, 0.25)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <LogIn size={16} /> Check In
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            disabled={!isShiftOpen || shiftLoading}
+            onClick={() => {
+              setAttendanceModal('checkOut');
+              setVerifyPassword('');
+              setVerifyError('');
+              setShowVerifyPassword(false);
+            }}
+            style={{
+              background: !isShiftOpen ? '#f4f4f5' : '#dc2626',
+              color: !isShiftOpen ? '#a1a1aa' : '#fff',
+              border: 'none',
+              padding: '10px 18px',
+              fontWeight: 700,
+              fontSize: 13,
+              borderRadius: 'var(--radius-sm)',
+              cursor: !isShiftOpen ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              boxShadow: !isShiftOpen ? 'none' : '0 2px 6px rgba(220, 38, 38, 0.25)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <LogOut size={16} /> Check Out
+          </button>
+        </div>
+      </div>
+
+      {/* Attendance Notification banner if available */}
+      {attendanceMsg && (
+        <div style={{
+          background: attendanceMsg.type === 'success' ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${attendanceMsg.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+          color: attendanceMsg.type === 'success' ? '#15803d' : '#dc2626',
+          padding: '10px 16px',
+          borderRadius: 'var(--radius-sm)',
+          marginBottom: 16,
+          fontSize: 13,
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          {attendanceMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+          {attendanceMsg.text}
+        </div>
+      )}
+
+      {/* ──── Password Verification Modal for Check In / Out ──── */}
+      {attendanceModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 14,
+            width: '100%',
+            maxWidth: 420,
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            overflow: 'hidden',
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: attendanceModal === 'checkIn' ? '#f0fdf4' : '#fef2f2',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: attendanceModal === 'checkIn' ? '#dcfce7' : '#fee2e2',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: attendanceModal === 'checkIn' ? '#16a34a' : '#dc2626',
+                }}>
+                  {attendanceModal === 'checkIn' ? <LogIn size={17} /> : <LogOut size={17} />}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+                    Confirm {attendanceModal === 'checkIn' ? 'Check In' : 'Check Out'}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--text-3)' }}>
+                    Please verify your account password to continue
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAttendanceModal(null); setVerifyPassword(''); setVerifyError(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 18, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleConfirmAttendance} style={{ padding: '20px' }}>
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '10px 12px',
+                marginBottom: 16,
+                fontSize: 12,
+                color: 'var(--text-2)'
+              }}>
+                <div>Staff: <strong>{profile?.name}</strong> {profile?.username ? `(@${profile.username})` : ''}</div>
+                <div>Time: <strong>{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</strong> ({todayStr()})</div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
+                  Re-enter Password
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showVerifyPassword ? 'text' : 'password'}
+                    className="inp"
+                    autoFocus
+                    placeholder="Enter your login password"
+                    value={verifyPassword}
+                    onChange={e => setVerifyPassword(e.target.value)}
+                    style={{
+                      width: '100%',
+                      paddingRight: 40,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowVerifyPassword(!showVerifyPassword)}
+                    style={{
+                      position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0
+                    }}
+                  >
+                    {showVerifyPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {verifyError && (
+                <div style={{
+                  background: '#fef2f2', border: '1px solid #fecaca',
+                  borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#dc2626',
+                  marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6
+                }}>
+                  <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                  {verifyError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => { setAttendanceModal(null); setVerifyPassword(''); setVerifyError(''); }}
+                  disabled={verifying}
+                  style={{ flex: 1, justifyContent: 'center' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn"
+                  disabled={verifying}
+                  style={{
+                    flex: 1,
+                    justifyContent: 'center',
+                    background: attendanceModal === 'checkIn' ? '#16a34a' : '#dc2626',
+                    color: '#fff',
+                    border: 'none',
+                    fontWeight: 700,
+                  }}
+                >
+                  {verifying ? (
+                    <><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Verifying...</>
+                  ) : (
+                    <>Confirm {attendanceModal === 'checkIn' ? 'Check In' : 'Check Out'}</>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ──── Date Navigation & Status ──── */}
       <div style={{
         display: 'flex', flexDirection: isMobile ? 'column' : 'row',
