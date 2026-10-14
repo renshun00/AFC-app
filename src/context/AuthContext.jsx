@@ -24,6 +24,13 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { validateLoginInput } from '../utils/security';
+import {
+  getLockState, recordFailedAttempt, clearFailedAttempts,
+} from '../services/loginSecurity';
+
+const LOCKED_MSG = 'This account is locked after 3 failed attempts. Please contact an administrator to unlock it.';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const AuthContext = createContext(null);
 
@@ -46,12 +53,45 @@ export function AuthProvider({ children }) {
   }, []);
 
   // ── Login with email + password directly via Firebase Auth ─────────────────
-  const login = async (email, password) => {
+  const login = async (rawEmail, rawPassword) => {
+    // 1. Validate / sanitise (blocks XML & markup injection)
+    const v = validateLoginInput(rawEmail, rawPassword);
+    if (!v.ok) return { ok: false, error: v.error };
+    const { email, password } = v;
+
+    // 2. Refuse if the account is locked (even with the correct password)
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const lock = await getLockState(email);
+      if (lock.locked) return { ok: false, locked: true, error: LOCKED_MSG };
+    } catch (err) {
+      console.error('[AuthContext] lock check failed:', err);
+      return { ok: false, error: 'Sign-in is temporarily unavailable. Please try again later.' };
+    }
+
+    // 3. Authenticate
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      clearFailedAttempts(email).catch(() => {});
       // onAuthStateChanged handles setting firebaseUser + profile
       return { ok: true };
     } catch (err) {
+      const isCredentialError = [
+        'auth/wrong-password', 'auth/invalid-credential', 'auth/user-not-found',
+      ].includes(err.code);
+
+      if (isCredentialError) {
+        await sleep(600 + Math.random() * 400); // slow down brute force / timing probes
+        try {
+          const r = await recordFailedAttempt(email);
+          if (r.locked) return { ok: false, locked: true, error: LOCKED_MSG };
+          return {
+            ok: false,
+            error: `Incorrect email or password. ${r.remaining} attempt${r.remaining === 1 ? '' : 's'} remaining before lockout.`,
+          };
+        } catch (e) {
+          console.error('[AuthContext] recordFailedAttempt failed:', e);
+        }
+      }
       return { ok: false, error: friendlyAuthError(err.code) };
     }
   };

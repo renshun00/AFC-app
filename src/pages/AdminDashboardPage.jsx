@@ -9,6 +9,7 @@ import {
   Loader,
 } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
+import LockedAccountsPanel from '../components/LockedAccountsPanel';
 import { where, orderBy, limit } from 'firebase/firestore';
 import {
   dailyProfitSummaryService,
@@ -476,6 +477,7 @@ export default function AdminDashboardPage({ isMobile, navigate }) {
           </div>
         </div>
       </div>
+      <LockedAccountsPanel />
     </div>
   );
 }

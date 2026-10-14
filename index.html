@@ -7,6 +7,11 @@
 
   <!-- PWA manifest is injected automatically by vite-plugin-pwa -->
 
+  <!-- Security hardening -->
+  <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+
   <!-- Theme -->
   <meta name="theme-color" content="#e8624a" />
   <meta name="application-name" content="AFC Management" />

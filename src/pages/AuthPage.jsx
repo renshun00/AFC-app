@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function AuthPage() {
@@ -7,9 +7,20 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [locked,   setLocked]   = useState(false);
+  const [honeypot, setHoneypot] = useState('');   // bots fill this; humans never see it
+  const [cooldown, setCooldown] = useState(0);    // client-side throttle (seconds)
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading || cooldown > 0) return;
+    if (honeypot) return;                          // silently drop bot submissions
     if (!email.trim() || !password) {
       setError('Please enter both email and password.');
       return;
@@ -21,6 +32,9 @@ export default function AuthPage() {
 
     if (!result.ok) {
       setError(result.error);
+      setLocked(!!result.locked);
+      setPassword('');                             // don't keep a wrong password in the DOM
+      if (!result.locked) setCooldown(2);
     }
     // On success, AuthContext updates firebaseUser + profile →
     // App.jsx automatically renders the main app.
@@ -59,11 +73,21 @@ export default function AuthPage() {
                 type="email"
                 placeholder="Enter your email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={e => { setLocked(false); setEmail(e.target.value.replace(/[<>"'`&;]/g, '')); }}
+                maxLength={254}
                 autoFocus
                 autoComplete="email"
+                spellCheck={false}
+                autoCapitalize="none"
               />
             </div>
+
+            {/* Honeypot – hidden from users and assistive tech */}
+            <input
+              type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true"
+              value={honeypot} onChange={e => setHoneypot(e.target.value)}
+              style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+            />
 
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 5 }}>
@@ -74,7 +98,8 @@ export default function AuthPage() {
                 type="password"
                 placeholder="Enter password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={e => setPassword(e.target.value.replace(/[<>]/g, ''))}
+                maxLength={128}
                 autoComplete="current-password"
               />
             </div>
@@ -92,8 +117,8 @@ export default function AuthPage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={loading}
-              style={{ width: '100%', justifyContent: 'center', padding: '11px', fontSize: 14, opacity: loading ? .7 : 1 }}
+              disabled={loading || locked || cooldown > 0}
+              style={{ width: '100%', justifyContent: 'center', padding: '11px', fontSize: 14, opacity: (loading || locked || cooldown > 0) ? .7 : 1 }}
             >
               {loading ? (
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -104,7 +129,7 @@ export default function AuthPage() {
                   }} />
                   Signing in…
                 </span>
-              ) : 'Sign In'}
+              ) : locked ? '🔒 Account Locked' : cooldown > 0 ? `Try again in ${cooldown}s` : 'Sign In'}
             </button>
           </form>
         </div>
