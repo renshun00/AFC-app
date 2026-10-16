@@ -1,6 +1,10 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
@@ -17,6 +21,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize and export services
-export const db = getFirestore(app);
+// Persistent IndexedDB cache: reloads/reconnects serve unchanged docs locally
+// and only bill for changed documents.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 export const auth = getAuth(app);
 export default app;
