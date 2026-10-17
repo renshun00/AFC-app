@@ -16,11 +16,7 @@ const NAV = [
 
 const ROLE_COLORS = {
   Admin: { bg: '#fde8e4', color: '#c0392b' },
-  Supervisor: { bg: '#fef3c7', color: '#b45309' },
-  Cashier: { bg: '#eff6ff', color: '#1d4ed8' },
-  Kitchen: { bg: '#d4f0e3', color: '#15803d' },
-  Driver: { bg: '#f4f4f5', color: '#52525b' },
-  Cleaner: { bg: '#f4f4f5', color: '#52525b' },
+  Staff: { bg: '#eff6ff', color: '#1d4ed8' },
 };
 
 export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, userRole }) {
@@ -106,7 +102,7 @@ export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, 
         )}
 
         {/* Settings — admin only */}
-        {(!userRole || userRole === 'Admin' || userRole === 'Supervisor') && (
+        {(!userRole || userRole === 'Admin') && (
           <div style={{ padding: '0 10px', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <button style={{
               display: 'flex', alignItems: 'center', gap: 10, width: '100%',

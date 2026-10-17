@@ -13,7 +13,7 @@
  * Staff Firestore document (collection: "staff", doc id = Firebase Auth UID):
  *   { name, role, email, isActive, staffCode, ... }
  *
- * Roles: Admin | Supervisor | Cashier | Kitchen | Driver | Cleaner
+ * Roles: Admin | Staff
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';

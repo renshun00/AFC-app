@@ -265,6 +265,7 @@ function RecentEntries({ entries, currentDate, onSelect, loading }) {
 
 export default function StaffDashboardPage({ isMobile }) {
   const { profile } = useAuth();
+  const isAdminUser = profile?.role === 'Admin';
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [formData, setFormData] = useState(buildEmptyDayData());
   const [notes, setNotes] = useState('');
@@ -983,7 +984,7 @@ export default function StaffDashboardPage({ isMobile }) {
                 <CategorySection
                   key={cat.key}
                   category={cat}
-                  products={CATEGORY_PRODUCTS[cat.key]}
+                  products={CATEGORY_PRODUCTS[cat.key].filter(p => isAdminUser || !p.adminOnly)}
                   values={formData[cat.key] || {}}
                   onChange={(prodKey, val) => handleChange(cat.key, prodKey, val)}
                   isOpen={!!openCategories[cat.key]}

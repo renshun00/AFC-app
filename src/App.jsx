@@ -14,15 +14,10 @@ import DailyReportPage from './pages/DailyReportPage';
 import ReportsPage from './pages/ReportsPage';
 import SuppliersPage from './pages/SuppliersPage';
 
-// Access control definition: non-admin staff get POS & Inventory only
+// Only two roles exist: Admin (full access) and Staff (dashboard, POS, inventory).
 const ROLE_PERMISSIONS = {
-  Admin:      ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
-  Supervisor: ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
-  Cashier:    ['dashboard', 'pos', 'inventory'],
-  Kitchen:    ['dashboard', 'pos', 'inventory'],
-  Driver:     ['dashboard', 'pos', 'inventory'],
-  Cleaner:    ['dashboard', 'pos', 'inventory'],
-  Staff:      ['dashboard', 'pos', 'inventory'],
+  Admin: ['dashboard', 'pos', 'inventory', 'suppliers', 'menu', 'staff', 'daily', 'reports'],
+  Staff: ['dashboard', 'pos', 'inventory'],
 };
 
 export default function App() {
@@ -62,8 +57,9 @@ export default function App() {
   }
 
   // ── Role-based page access ───────────────────────────────────────────────────
-  const userRole = profile.role || 'Staff';
-  const allowed = ROLE_PERMISSIONS[userRole] || ['pos', 'inventory'];
+  // Any legacy/unknown role is treated as plain Staff.
+  const userRole = profile.role === 'Admin' ? 'Admin' : 'Staff';
+  const allowed = ROLE_PERMISSIONS[userRole];
 
   // Navigate only to pages the role can access
   const navigate = (p) => {

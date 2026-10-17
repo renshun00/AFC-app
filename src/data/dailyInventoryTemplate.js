@@ -46,18 +46,18 @@ export const CATEGORIES = [
 // `key` must be unique within a category.
 // `uom` is the unit of measure code shown in the input.
 
+// `adminOnly: true` rows are hidden from non-Admin users (e.g. KG weights from
+// the supplier bill, used for COS reporting).
 export const CATEGORY_PRODUCTS = {
   raw_materials: [
-    { key: 'chicken_kg', label: 'Chicken', uom: 'KG', uomLabel: 'kg' },
+    { key: 'chicken_kg', label: 'Chicken', uom: 'KG', uomLabel: 'kg', adminOnly: true },
     { key: 'chicken_whole', label: 'Chicken', uom: 'WHOLE', uomLabel: 'whole' },
     { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
-    { key: 'carcass_kg', label: 'Carcass', uom: 'KG', uomLabel: 'kg' },
+    { key: 'carcass_kg', label: 'Carcass', uom: 'KG', uomLabel: 'kg', adminOnly: true },
     { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'neck', label: 'Neck', uom: 'PC', uomLabel: 'pc' },
     { key: 'tube_ice', label: 'Tube Ice', uom: 'BAG', uomLabel: 'bag' },
-    { key: 'crushed_ice', label: 'Crushed Ice', uom: 'BAG', uomLabel: 'bag' },
     { key: 'oil_topup_packet', label: 'Oil Top-Up (Packet)', uom: 'KG', uomLabel: 'kg' },
-    { key: 'oil_topup_bottle', label: 'Oil Top-Up (Bottle)', uom: 'KG', uomLabel: 'kg' },
   ],
 
   brought_to_stall: [
@@ -66,12 +66,9 @@ export const CATEGORY_PRODUCTS = {
     { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set' },
     { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'skin', label: 'Skin', uom: 'PC', uomLabel: 'pc' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
   ],
 
   remaining_fried: [
@@ -90,13 +87,10 @@ export const CATEGORY_PRODUCTS = {
 
   other_remaining: [
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'skin', label: 'Skin', uom: 'PC', uomLabel: 'pc' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', uom: 'PC', uomLabel: 'pc' },
-  ],
+  ]
 };
 
 /**

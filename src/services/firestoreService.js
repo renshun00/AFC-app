@@ -908,7 +908,7 @@ export const staffService = {
       name,
       username,
       email,
-      role: role || 'Cashier',
+      role: role === 'Admin' ? 'Admin' : 'Staff',
       status: status || 'active',
       password, // retained for in-app credential view
       tasks: tasks || [],

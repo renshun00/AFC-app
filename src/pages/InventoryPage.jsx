@@ -37,8 +37,8 @@ const toDoc = (form) => ({
 const emptyForm = { name:'',unit:'kg',stock:0,minStock:0,cost:0,category:'',supplierId:'',isArchived:false };
 
 export default function InventoryPage({ isMobile, userRole }) {
-  // Only Admin/Supervisor may purchase or add new stock
-  const isAdmin = userRole === 'Admin' || userRole === 'Supervisor';
+  // Only Admin may purchase or add new stock
+  const isAdmin = userRole === 'Admin';
   const { data: productDocs, loading, error } = useFirestore(
     'products',
     where('isInventoryItem', '==', true),
