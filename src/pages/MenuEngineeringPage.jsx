@@ -119,7 +119,7 @@ function RecipeIngredientRow({ ingredient, inventoryItems, onUpdate, onRemove })
 
   // Calculate the cost for this ingredient row
   const unitCostPerBase = invItem?.standardCost ?? 0;
-  const qtyInBase = convertToBaseUnit(ingredient.qtyPerUnit || 0, ingredient.unit);
+  const qtyInBase = convertToBaseUnit(ingredient.qtyPerUnit || 0, ingredient.unit, baseUnit);
   const rowCost = qtyInBase * unitCostPerBase;
 
   return (
@@ -135,6 +135,9 @@ function RecipeIngredientRow({ ingredient, inventoryItems, onUpdate, onRemove })
         <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
           Stock: {invItem ? `${invItem.stock} ${baseUnit}` : 'N/A'}
           {unitCostPerBase > 0 && <> · RM{unitCostPerBase.toFixed(2)}/{baseUnit}</>}
+          {(ingredient.inventoryItemName || '').toLowerCase().includes('chicken (pieces)') && (
+            <span style={{ color: '#2563eb', fontWeight: 500 }}> · 237g avg (9 pcs/whole)</span>
+          )}
         </div>
       </div>
 
@@ -821,46 +824,82 @@ export default function MenuEngineeringPage({ isMobile }) {
                 <span style={{ fontSize: 12 }}>Click "Edit Item" to link ingredients from inventory.</span>
               </div>
             ) : (
-              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Ingredient</th>
-                      <th style={{ textAlign: 'center' }}>Portion Needed</th>
-                      <th style={{ textAlign: 'center' }}>In Stock</th>
-                      <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedItem.recipe.map(ing => {
-                      const invItem = inventoryDocs.find(i => i.id === ing.inventoryItemId);
-                      const qtyInBase = convertToBaseUnit(ing.qtyPerUnit, ing.unit);
-                      const unitCost = invItem?.standardCost ?? 0;
-                      const lineCost = qtyInBase * unitCost;
-                      const currentStock = invItem ? `${invItem.stock} ${invItem.uomCode ?? ''}` : 'Not found';
+              <div>
+                {/* Formula Explanation Callout */}
+                {selectedItem.recipe.some(r => (r.inventoryItemName || '').toLowerCase().includes('chicken')) && (
+                  <div style={{
+                    background: '#f0fdf4', border: '1px solid #bbf7d0',
+                    borderRadius: 'var(--radius-sm)', padding: '10px 14px',
+                    marginBottom: 12, fontSize: 12, color: '#166534',
+                  }}>
+                    <strong style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      🍗 Chicken Piece COS Formula (Linked to Supplier Bill KG):
+                    </strong>
+                    <div>
+                      1 Whole Chicken = 9 Pieces · Average weight = 237g (0.237 kg) / piece.<br />
+                      The chicken piece cost is calculated directly from the KG price in supplier bills, which feeds this recipe's Cost of Sales (COS).
+                    </div>
+                  </div>
+                )}
 
-                      return (
-                        <tr key={ing.inventoryItemId}>
-                          <td style={{ fontWeight: 600 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <Link2 size={12} style={{ color: 'var(--primary)' }} />
-                              {ing.inventoryItemName || invItem?.name || ing.inventoryItemId}
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'center', fontWeight: 600 }}>
-                            {ing.qtyPerUnit} {ing.unit}
-                          </td>
-                          <td style={{ textAlign: 'center', color: 'var(--text-2)' }}>
-                            {currentStock}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                            RM{lineCost.toFixed(2)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+                  <table className="data-table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>Ingredient</th>
+                        <th style={{ textAlign: 'center' }}>Portion Needed</th>
+                        <th style={{ textAlign: 'center' }}>In Stock</th>
+                        <th style={{ textAlign: 'right' }}>Est. Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedItem.recipe.map(ing => {
+                        const invItem = inventoryDocs.find(i => i.id === ing.inventoryItemId);
+                        const baseUnit = invItem?.uomCode ?? invItem?.unit ?? ing.baseUnit;
+                        const qtyInBase = convertToBaseUnit(ing.qtyPerUnit, ing.unit, baseUnit);
+                        const unitCost = invItem?.standardCost ?? 0;
+                        const lineCost = qtyInBase * unitCost;
+                        const currentStock = invItem ? `${invItem.stock} ${baseUnit ?? ''}` : 'Not found';
+                        const ingName = ing.inventoryItemName || invItem?.name || ing.inventoryItemId;
+
+                        return (
+                          <tr key={ing.inventoryItemId}>
+                            <td style={{ fontWeight: 600 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Link2 size={12} style={{ color: 'var(--primary)' }} />
+                                <span>{ingName}</span>
+                              </div>
+                              {ingName.toLowerCase().includes('chicken (pieces)') && (
+                                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 400, marginTop: 2, paddingLeft: 18 }}>
+                                  🍗 1 pc avg 237g · Rate RM{unitCost.toFixed(2)}/pc (1 whole = 9 pcs)
+                                </div>
+                              )}
+                              {ingName.toLowerCase().includes('carcass') && (
+                                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 400, marginTop: 2, paddingLeft: 18 }}>
+                                  🦴 1 pc avg 443g · Rate RM{unitCost.toFixed(2)}/pc
+                                </div>
+                              )}
+                              {ingName.toLowerCase().includes('flour') && (
+                                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 400, marginTop: 2, paddingLeft: 18 }}>
+                                  🌾 Single Flour inventory · RM{unitCost.toFixed(2)}/kg
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                              {ing.qtyPerUnit} {ing.unit}
+                            </td>
+                            <td style={{ textAlign: 'center', color: 'var(--text-2)' }}>
+                              {currentStock}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                              RM{lineCost.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 

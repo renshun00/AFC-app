@@ -51,6 +51,7 @@ import {
 import { db } from '../firebase';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFriedAndSoldQuantities, getRawMaterialUsage } from '../utils/dailyFlowCalculator';
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -718,8 +719,43 @@ export const productService = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UNIT CONVERSION HELPERS (g↔kg, mL↔L)
+// CHICKEN & MEAT METRICS (1 whole = 9 pcs, 1 pc avg 237g, used for COS formulas)
 // ─────────────────────────────────────────────────────────────────────────────
+
+export const CHICKEN_CONVERSION = {
+  PIECES_PER_WHOLE: 9,
+  AVG_PIECE_WEIGHT_KG: 0.237, // 237g per chicken piece
+  WHOLE_WEIGHT_KG: 2.133, // 9 * 0.237 kg
+  STANDARD_PRICE_PER_KG: 9.40, // RM 9.40 / kg standard
+  CARCASS_AVG_WEIGHT_KG: 0.443, // 443g per carcass piece
+  CARCASS_STANDARD_PRICE_PER_KG: 3.50, // RM 3.50 / kg standard
+  FLOUR_PRICE_PER_KG: 14.00, // RM 14.00 / kg standard
+};
+
+/**
+ * Calculates chicken piece cost and whole chicken cost from a given price per KG.
+ * @param {number} pricePerKg - chicken price per kg (e.g. 9.40)
+ * @returns {{ pieceCost: number, wholeCost: number, pricePerKg: number }}
+ */
+export function calculateChickenCosts(pricePerKg = 9.40) {
+  const pieceCost = Math.round(pricePerKg * CHICKEN_CONVERSION.AVG_PIECE_WEIGHT_KG * 100) / 100;
+  const wholeCost = Math.round(pieceCost * CHICKEN_CONVERSION.PIECES_PER_WHOLE * 100) / 100;
+  return { pieceCost, wholeCost, pricePerKg };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIT CONVERSION HELPERS (g↔kg, mL↔L, whole↔pcs, pc↔pcs unified)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Unify unit codes: 'pc', 'pcs', 'piece', 'pieces' are all unified to 'pcs'.
+ */
+export function normalizeUnit(unit) {
+  if (!unit) return 'pcs';
+  const u = String(unit).toLowerCase().trim();
+  if (u === 'pc' || u === 'pcs' || u === 'piece' || u === 'pieces' || u === 'ketul') return 'pcs';
+  return u;
+}
 
 /**
  * Defines which recipe sub-units map to which inventory base units,
@@ -728,30 +764,53 @@ export const productService = {
  * recipeUnit → { baseUnit, factor }
  * "60 g" → 60 / 1000 = 0.06 kg
  * "200 mL" → 200 / 1000 = 0.2 L
+ * "1 pc" / "1 pcs" → unified 1 pcs (factor 1)
  */
 const UNIT_CONVERSIONS = {
   g: { baseUnit: 'kg', factor: 1000 },   // 1 kg = 1000 g
+  gram: { baseUnit: 'kg', factor: 1000 },
   mL: { baseUnit: 'L', factor: 1000 },   // 1 L  = 1000 mL
+  pc: { baseUnit: 'pcs', factor: 1 },    // pc and pcs are united
+  pcs: { baseUnit: 'pcs', factor: 1 },
 };
 
 /** All recipe-entry units available for a given inventory base unit. */
 export const RECIPE_UNITS_FOR_BASE = {
-  kg: ['g', 'kg'],
+  kg: ['g', 'kg', 'gram'],
   L: ['mL', 'L'],
   pcs: ['pcs'],
+  whole: ['whole', 'pcs'],
+  set: ['set'],
   box: ['box'],
   pack: ['pack'],
+  bag: ['bag'],
+  pc: ['pcs'], // pc alias united to pcs
+  gram: ['gram', 'g', 'kg'],
 };
 
 /**
  * Convert a recipe quantity to the inventory's base unit.
- * e.g. convertToBaseUnit(60, 'g')  → 0.06  (kg)
- *      convertToBaseUnit(2, 'kg')  → 2     (kg, no conversion needed)
- *      convertToBaseUnit(5, 'pcs') → 5     (pcs, no conversion needed)
+ * e.g. convertToBaseUnit(60, 'g', 'kg')     → 0.06  (kg)
+ *      convertToBaseUnit(9, 'pcs', 'whole') → 1     (whole)
+ *      convertToBaseUnit(2, 'kg', 'kg')     → 2     (kg, no conversion needed)
+ *      convertToBaseUnit(5, 'pcs', 'pcs')   → 5     (pcs, no conversion needed)
+ *      convertToBaseUnit(1, 'pc', 'pcs')    → 1     (pcs, pc/pcs united)
  */
-export function convertToBaseUnit(qty, recipeUnit) {
-  const conv = UNIT_CONVERSIONS[recipeUnit];
-  if (conv) return qty / conv.factor;
+export function convertToBaseUnit(qty, recipeUnit, baseUnit = null) {
+  const normRecipe = normalizeUnit(recipeUnit);
+  const normBase = baseUnit ? normalizeUnit(baseUnit) : null;
+
+  if (normBase === 'whole' && normRecipe === 'pcs') {
+    return qty / CHICKEN_CONVERSION.PIECES_PER_WHOLE;
+  }
+  if (normBase === 'pcs' && normRecipe === 'whole') {
+    return qty * CHICKEN_CONVERSION.PIECES_PER_WHOLE;
+  }
+  if (normBase && normBase === normRecipe) {
+    return qty;
+  }
+  const conv = UNIT_CONVERSIONS[recipeUnit] || UNIT_CONVERSIONS[normRecipe];
+  if (conv && (!normBase || normBase === normalizeUnit(conv.baseUnit))) return qty / conv.factor;
   return qty; // already in base unit
 }
 
@@ -759,9 +818,21 @@ export function convertToBaseUnit(qty, recipeUnit) {
  * Convert an inventory base-unit quantity to a recipe sub-unit.
  * e.g. convertFromBaseUnit(0.06, 'g') → 60  (from kg)
  */
-export function convertFromBaseUnit(baseQty, recipeUnit) {
-  const conv = UNIT_CONVERSIONS[recipeUnit];
-  if (conv) return baseQty * conv.factor;
+export function convertFromBaseUnit(baseQty, recipeUnit, baseUnit = null) {
+  const normRecipe = normalizeUnit(recipeUnit);
+  const normBase = baseUnit ? normalizeUnit(baseUnit) : null;
+
+  if (normBase === 'whole' && normRecipe === 'pcs') {
+    return baseQty * CHICKEN_CONVERSION.PIECES_PER_WHOLE;
+  }
+  if (normBase === 'pcs' && normRecipe === 'whole') {
+    return baseQty / CHICKEN_CONVERSION.PIECES_PER_WHOLE;
+  }
+  if (normBase && normBase === normRecipe) {
+    return baseQty;
+  }
+  const conv = UNIT_CONVERSIONS[recipeUnit] || UNIT_CONVERSIONS[normRecipe];
+  if (conv && (!normBase || normBase === normalizeUnit(conv.baseUnit))) return baseQty * conv.factor;
   return baseQty;
 }
 
@@ -796,8 +867,9 @@ export const recipeService = {
       const invItem = inventoryItems.find(i => i.id === ingredient.inventoryItemId);
       if (!invItem) return 0; // ingredient not found in inventory → can't make any
 
+      const baseUnit = invItem.uomCode ?? invItem.unit ?? ingredient.baseUnit;
       const stockInBaseUnit = invItem.stock ?? 0;
-      const qtyNeededInBaseUnit = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit);
+      const qtyNeededInBaseUnit = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit, baseUnit);
       if (qtyNeededInBaseUnit <= 0) continue;
 
       const canMake = stockInBaseUnit / qtyNeededInBaseUnit;
@@ -824,7 +896,8 @@ export const recipeService = {
       const prodDoc = productDocs.find(p => p.id === ingredient.inventoryItemId);
       if (!prodDoc) continue;
 
-      const deductInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit) * multiplier;
+      const baseUnit = prodDoc.uomCode ?? prodDoc.unit ?? ingredient.baseUnit;
+      const deductInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit, baseUnit) * multiplier;
       const currentStock = prodDoc.stock ?? 0;
       const newStock = Math.max(0, currentStock - deductInBase);
 
@@ -857,8 +930,10 @@ export const recipeService = {
       const invItem = inventoryItems.find(i => i.id === ingredient.inventoryItemId);
       if (!invItem) continue;
 
-      const qtyInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit);
-      total += qtyInBase * (invItem.standardCost ?? 0);
+      const baseUnit = invItem.uomCode ?? invItem.unit ?? ingredient.baseUnit;
+      const qtyInBase = convertToBaseUnit(ingredient.qtyPerUnit, ingredient.unit, baseUnit);
+      const unitCost = invItem.standardCost ?? invItem.cost ?? 0;
+      total += qtyInBase * unitCost;
     }
 
     return Math.round(total * 100) / 100; // round to 2 dp
@@ -1093,4 +1168,67 @@ export const dailyInventoryService = {
 
   /** Delete a day's entry. */
   delete: (date) => deleteDoc(ref('daily_inventory', date)),
+
+  /**
+   * Directly synchronize inventory stock levels in `products` with the daily usage
+   * computed from Staff Dashboard input (Excel model).
+   */
+  syncInventoryFromDailyData: async (date, dayData) => {
+    const friedAndSold = getFriedAndSoldQuantities(dayData);
+    const rawUsage = getRawMaterialUsage(friedAndSold);
+    const { fried, sold } = friedAndSold;
+
+    const usagesToDeduct = [
+      { name: 'Chicken (Pieces)', qty: fried?.chicken_pcs || 0 },
+      { name: 'Carcass', qty: fried?.carcass_pcs || 0 },
+      { name: 'Chicken Neck', qty: (fried?.neck || 0) * 4 }, // 4 pcs per set
+      { name: 'Mushroom (Enoki)', qty: fried?.mushroom || 0 },
+      // 1 single inventory item for FLOUR: 30g/chicken pc, 125g/carcass pc, 100g/mushroom set, 75g/neck set
+      { name: 'Flour (Tepung)', qty: Math.round((rawUsage?.flourKg || 0) * 1000) / 1000 },
+      { name: 'Cooking Oil (Packet)', qty: Number(dayData?.raw_materials?.oil_topup_packet || 0) },
+      { name: 'Tube Ice', qty: Number(dayData?.raw_materials?.tube_ice || 0) },
+      { name: 'Cheese Sauce (Sos Cheese)', qty: sold?.cheese_sauce || 0 },
+      { name: 'Korean Sauce (Sos Korean)', qty: sold?.korean_sauce || 0 },
+      { name: 'Green Sauce (Sos Hijau)', qty: sold?.green_sauce || 0 },
+      { name: 'BBQ Sauce (Sos BBQ)', qty: sold?.bbq_sauce || 0 },
+      { name: 'Chili Sauce Sachet (9g)', qty: rawUsage?.saucePackets || 0 },
+      { name: 'Paper Wrap (Bungkus Kertas)', qty: rawUsage?.paperWraps || 0 },
+      { name: 'Plastic Bag (Beg Plastik)', qty: rawUsage?.plasticBags || 0 },
+      { name: 'Sauce Container (Bekas Sos)', qty: rawUsage?.sauceContainers || 0 },
+      { name: 'Gloves (Sarung Tangan)', qty: rawUsage?.glovesUnits || 0 },
+      { name: 'LPG Gas (Tong Gas)', qty: rawUsage?.gasKg || 0 },
+      { name: 'Rice / Beras (5kg)', qty: rawUsage?.riceKg || 0 },
+      { name: 'Butter', qty: rawUsage?.butterKg || 0 },
+      { name: 'Evaporated Milk (Susu Cair)', qty: rawUsage?.milkKg || 0 },
+      { name: 'Rice Plastic Box (Bekas Nasi)', qty: rawUsage?.riceContainers || 0 },
+      { name: 'Soup Plastic Box (Bekas Sup)', qty: rawUsage?.soupContainers || 0 },
+    ].filter(item => item.qty > 0);
+
+    if (usagesToDeduct.length === 0) return;
+
+    // Load active inventory items from products
+    const q = query(col('products'), where('isInventoryItem', '==', true), where('isActive', '==', true));
+    const snap = await getDocs(q);
+    const existingProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    for (const item of usagesToDeduct) {
+      const match = existingProducts.find(p => p.name === item.name);
+      if (match) {
+        const currentStock = Number(match.stock) || 0;
+        const newStock = Math.max(0, Math.round((currentStock - item.qty) * 100) / 100);
+        await updateDoc(ref('products', match.id), {
+          stock: newStock,
+          updatedAt: serverTimestamp(),
+        });
+        await addDoc(col('inventory_transactions'), {
+          productId: match.id,
+          productName: match.name,
+          type: 'DAILY_USAGE',
+          qty: -item.qty,
+          referenceId: `daily_${date}`,
+          createdAt: serverTimestamp(),
+        });
+      }
+    }
+  },
 };

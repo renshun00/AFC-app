@@ -224,12 +224,32 @@ export default function AdminDashboardPage({ isMobile, navigate }) {
     return { text: `${pct >= 0 ? '+' : ''}${pct}% from yesterday`, up: pct >= 0 };
   }, [todayStats.costOfSales, yesterdayCost]);
 
-  // ─── Chicken used today ─────────────────────────────────────────────────
-  const chickenUsed = useMemo(() => {
-    const chickenItems = inventoryProducts.filter(p =>
-      p.name && p.name.toLowerCase().includes('chicken') && p.isInventoryItem
-    );
-    return chickenItems.reduce((s, p) => s + (p.stock ?? 0), 0);
+  // ─── Chicken stock today (converted to KG: 237g/piece, 1 whole = 9 pcs = 2.133kg) ─
+  const chickenStockData = useMemo(() => {
+    let totalKg = 0;
+    let wholeCount = 0;
+    let pcsCount = 0;
+
+    for (const p of inventoryProducts) {
+      if (!p.isInventoryItem || p.isArchived) continue;
+      const name = (p.name || '').toLowerCase();
+      const stock = Number(p.stock) || 0;
+      if (name.includes('chicken (whole)')) {
+        wholeCount += stock;
+        totalKg += stock * 2.133; // 9 pcs * 0.237 kg
+      } else if (name.includes('chicken (pieces)')) {
+        pcsCount += stock;
+        totalKg += stock * 0.237; // 237g per piece
+      } else if (name.includes('chicken') && (p.unit === 'kg' || p.uomCode === 'kg')) {
+        totalKg += stock;
+      }
+    }
+
+    return {
+      totalKg: Math.round(totalKg * 10) / 10,
+      wholeCount,
+      pcsCount,
+    };
   }, [inventoryProducts]);
 
   // ─── Staff wages today ──────────────────────────────────────────────────
@@ -356,10 +376,17 @@ export default function AdminDashboardPage({ isMobile, navigate }) {
               <Utensils size={18} />
             </div>
             <div>
-              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 2 }}>Chicken Stock</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 2 }}>Chicken Stock (Total Weight)</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
-                {invLoading ? <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} /> : `${chickenUsed} kg`}
+                {invLoading ? <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} /> : `${chickenStockData.totalKg} kg`}
               </div>
+              {!invLoading && (chickenStockData.wholeCount > 0 || chickenStockData.pcsCount > 0) && (
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+                  {chickenStockData.wholeCount > 0 && `${chickenStockData.wholeCount} whole (${chickenStockData.wholeCount * 9} pcs)`}
+                  {chickenStockData.wholeCount > 0 && chickenStockData.pcsCount > 0 && ' · '}
+                  {chickenStockData.pcsCount > 0 && `${chickenStockData.pcsCount} pcs (237g avg)`}
+                </div>
+              )}
             </div>
           </div>
           {/* Staff wages */}

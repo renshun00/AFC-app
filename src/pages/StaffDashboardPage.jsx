@@ -155,8 +155,18 @@ function CategorySection({ category, products, values, onChange, isOpen, onToggl
                 borderBottom: idx < products.length - 1 ? '1px solid var(--border-soft)' : 'none',
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
-                {prod.label}
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                <span>{prod.label}</span>
+                {prod.adminOnly && (
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: 4 }}>
+                    Admin Bill KG
+                  </span>
+                )}
+                {category.key === 'raw_materials' && prod.key === 'chicken_pcs' && (
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#3b82f6', background: '#eff6ff', padding: '1px 5px', borderRadius: 4 }}>
+                    1 whole = 9 pcs
+                  </span>
+                )}
               </div>
               <div style={{
                 textAlign: 'center', fontSize: 11, fontWeight: 600,
@@ -480,13 +490,23 @@ export default function StaffDashboardPage({ isMobile }) {
 
   // ─── Update a single product value ──────────────────────────────────────
   const handleChange = useCallback((categoryKey, productKey, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [categoryKey]: {
+    setFormData(prev => {
+      const nextCategory = {
         ...prev[categoryKey],
         [productKey]: value,
-      },
-    }));
+      };
+
+      // 1 WHOLE chicken is portioned into 9 pieces of chicken:
+      if (categoryKey === 'raw_materials' && productKey === 'chicken_whole') {
+        const wholeCount = Number(value) || 0;
+        nextCategory.chicken_pcs = Math.round(wholeCount * 9);
+      }
+
+      return {
+        ...prev,
+        [categoryKey]: nextCategory,
+      };
+    });
   }, []);
 
   // ─── Toggle category accordion ──────────────────────────────────────────
@@ -494,7 +514,7 @@ export default function StaffDashboardPage({ isMobile }) {
     setOpenCategories(prev => ({ ...prev, [catKey]: !prev[catKey] }));
   }, []);
 
-  // ─── Save as draft ──────────────────────────────────────────────────────
+  // ─── Save as draft or final submit ──────────────────────────────────────
   const handleSave = useCallback(async (finalSubmit = false) => {
     setSaving(true);
     setSaveMsg(null);
@@ -507,8 +527,16 @@ export default function StaffDashboardPage({ isMobile }) {
         finalSubmit ? 'submitted' : 'draft',
         notes,
       );
-      if (finalSubmit) setStatus('submitted');
-      setSaveMsg({ type: 'success', text: finalSubmit ? 'Submitted successfully!' : 'Draft saved!' });
+      if (finalSubmit) {
+        setStatus('submitted');
+        // Synchronize inventory stock with the daily dashboard usage:
+        try {
+          await dailyInventoryService.syncInventoryFromDailyData(selectedDate, formData);
+        } catch (syncErr) {
+          console.warn('[StaffDashboardPage] inventory sync warning:', syncErr);
+        }
+      }
+      setSaveMsg({ type: 'success', text: finalSubmit ? 'Submitted & inventory updated!' : 'Draft saved!' });
       setTimeout(() => setSaveMsg(null), 3000);
     } catch (err) {
       console.error('[Dashboard] save error:', err);

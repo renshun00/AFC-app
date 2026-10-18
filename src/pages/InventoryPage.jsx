@@ -2,17 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
 import { Plus, Search, AlertTriangle, PackagePlus, Trash2, Pencil, Package, Truck, Calendar, ArrowUpRight, ArrowDownRight, Tag, ShoppingCart, Archive, ArchiveRestore } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
-import { productService, inventoryTransactionService, supplierPurchaseService } from '../services/firestoreService';
+import { productService, inventoryTransactionService, supplierPurchaseService, CHICKEN_CONVERSION, calculateChickenCosts, normalizeUnit } from '../services/firestoreService';
 import { Modal, FormRow } from '../components/Layout';
 
 // Firestore `products` docs use different field names than this page's UI.
-// These two helpers translate between them so the rest of the component
-// can keep working with the simple { name, unit, stock, minStock, cost,
-// category, supplier, isArchived } shape it already uses.
+// Both 'pc' and 'pcs' are united into 'pcs' (piece).
 const fromDoc = (d) => ({
   id: d.id,
   name: d.name ?? '',
-  unit: d.uomCode ?? 'kg',
+  unit: normalizeUnit(d.uomCode ?? d.unit ?? 'pcs'),
   stock: d.stock ?? 0,
   minStock: d.minStock ?? 0,
   cost: d.standardCost ?? 0,
@@ -23,7 +21,8 @@ const fromDoc = (d) => ({
 
 const toDoc = (form) => ({
   name: form.name,
-  uomCode: form.unit,
+  uomCode: normalizeUnit(form.unit),
+  unit: normalizeUnit(form.unit),
   stock: Number(form.stock),
   minStock: Number(form.minStock),
   standardCost: Number(form.cost),
@@ -34,7 +33,10 @@ const toDoc = (form) => ({
   isArchived: form.isArchived ?? false,
 });
 
-const emptyForm = { name:'',unit:'kg',stock:0,minStock:0,cost:0,category:'',supplierId:'',isArchived:false };
+// Single unified list of units — 'pc' and 'pcs' are united as 'pcs' (piece)
+const INVENTORY_UNITS = ['kg', 'pcs', 'whole', 'set', 'bag', 'gram', 'box', 'pack', 'L'];
+
+const emptyForm = { name:'',unit:'pcs',stock:0,minStock:0,cost:0,category:'',supplierId:'',isArchived:false };
 
 export default function InventoryPage({ isMobile, userRole }) {
   // Only Admin may purchase or add new stock
@@ -101,6 +103,56 @@ export default function InventoryPage({ isMobile, userRole }) {
   // Filter items by tab (active vs archived) and search term
   const activeItems = useMemo(() => items.filter(i => !i.isArchived), [items]);
   const archivedItems = useMemo(() => items.filter(i => !!i.isArchived), [items]);
+
+  // Chicken items lookup for piece price & bill KG calculations
+  const chickenPiecesItem = useMemo(() => items.find(i => i.name.toLowerCase().includes('chicken (pieces)')), [items]);
+  const chickenWholeItem = useMemo(() => items.find(i => i.name.toLowerCase().includes('chicken (whole)')), [items]);
+  const carcassItem = useMemo(() => items.find(i => i.name.toLowerCase().includes('carcass')), [items]);
+
+  // Chicken bill price calculator state
+  const [showChickenCalc, setShowChickenCalc] = useState(false);
+  const [chickenPriceInput, setChickenPriceInput] = useState('9.40');
+  const [billCostInput, setBillCostInput] = useState('');
+  const [billKgInput, setBillKgInput] = useState('');
+
+  const handleApplyChickenRate = async () => {
+    const rate = parseFloat(chickenPriceInput);
+    if (!rate || rate <= 0) {
+      alert('Please enter a valid chicken price per KG.');
+      return;
+    }
+    const pieceCost = Math.round(rate * CHICKEN_CONVERSION.AVG_PIECE_WEIGHT_KG * 100) / 100;
+    const wholeCost = Math.round(pieceCost * CHICKEN_CONVERSION.PIECES_PER_WHOLE * 100) / 100;
+
+    setSaving(true);
+    try {
+      if (chickenPiecesItem) {
+        await productService.update(chickenPiecesItem.id, {
+          standardCost: pieceCost,
+          cost: pieceCost,
+          pricePerKg: rate,
+          avgWeightKg: CHICKEN_CONVERSION.AVG_PIECE_WEIGHT_KG,
+        });
+      }
+      if (chickenWholeItem) {
+        await productService.update(chickenWholeItem.id, {
+          standardCost: wholeCost,
+          cost: wholeCost,
+          pricePerKg: rate,
+          avgWeightKg: CHICKEN_CONVERSION.WHOLE_WEIGHT_KG,
+        });
+      }
+      setShowChickenCalc(false);
+      setBillCostInput('');
+      setBillKgInput('');
+      alert(`Chicken pricing updated!\n• Rate: RM ${rate.toFixed(2)}/kg\n• Piece Cost (237g): RM ${pieceCost.toFixed(2)}\n• Whole Bird (9 pcs): RM ${wholeCost.toFixed(2)}\nMenu item COS formulas will now automatically reflect these latest costs.`);
+    } catch (err) {
+      console.error('[InventoryPage] update chicken rate failed:', err);
+      alert('Failed to update chicken pricing.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const displayedItems = useMemo(() => {
     const pool = activeTab === 'active' ? activeItems : archivedItems;
@@ -340,6 +392,51 @@ export default function InventoryPage({ isMobile, userRole }) {
         </div>
       )}
 
+      {/* ── Chicken & Meat KG Cost Formula Hub ── */}
+      <div style={{
+        background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+        border: '1.5px solid #fde68a',
+        borderRadius: 'var(--radius)',
+        padding: '12px 16px',
+        marginBottom: 14,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: '#f59e0b', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 700, fontSize: 18 }}>
+            🍗
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>Chicken Piece Price Formula</span>
+              <span style={{ fontSize: 10, fontWeight: 700, background: '#fde68a', color: '#b45309', padding: '1px 6px', borderRadius: 4 }}>
+                1 Whole = 9 Pieces · 1 Pc Avg = 237g (0.237 kg)
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+              Current Piece Cost: <strong>RM{chickenPiecesItem?.cost ? chickenPiecesItem.cost.toFixed(2) : '2.23'}/pc</strong> (RM{((chickenPiecesItem?.cost || 2.23) / 0.237).toFixed(2)}/kg) · Whole Bird: <strong>RM{chickenWholeItem?.cost ? chickenWholeItem.cost.toFixed(2) : '20.05'}/whole</strong> · Directly calculates Menu COS (Fried Chicken: RM2.65)
+            </div>
+          </div>
+        </div>
+        {isAdmin && (
+          <button
+            className="btn btn-sm"
+            onClick={() => {
+              const currentCost = chickenPiecesItem?.cost || 2.23;
+              setChickenPriceInput(((currentCost / 0.237)).toFixed(2));
+              setShowChickenCalc(true);
+            }}
+            style={{ background: '#d97706', color: '#fff', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          >
+            <Tag size={13} /> Update Bill Rate (KG)
+          </button>
+        )}
+      </div>
+
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
@@ -538,7 +635,7 @@ export default function InventoryPage({ isMobile, userRole }) {
             </FormRow>
             <FormRow label="Unit">
               <select className="inp" value={addForm.unit} onChange={e=>setAddForm(f=>({...f,unit:e.target.value}))}>
-                {['kg','L','pcs','box','pack'].map(u=><option key={u}>{u}</option>)}
+                {INVENTORY_UNITS.map(u=><option key={u} value={u}>{u}</option>)}
               </select>
             </FormRow>
             <FormRow label="Opening Stock">
@@ -578,7 +675,7 @@ export default function InventoryPage({ isMobile, userRole }) {
             </FormRow>
             <FormRow label="Unit">
               <select className="inp" value={editForm.unit} onChange={e=>setEditForm(f=>({...f,unit:e.target.value}))}>
-                {['kg','L','pcs','box','pack'].map(u=><option key={u}>{u}</option>)}
+                {INVENTORY_UNITS.map(u=><option key={u} value={u}>{u}</option>)}
               </select>
             </FormRow>
             <FormRow label="Current Stock">
@@ -596,11 +693,136 @@ export default function InventoryPage({ isMobile, userRole }) {
                 {supplierDocs.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </FormRow>
+
+            {editForm.name.toLowerCase().includes('chicken (pieces)') && (
+              <div style={{ gridColumn: '1 / -1', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12, color: '#1e40af' }}>
+                <strong>🍗 Chicken Piece Cost Formula:</strong><br />
+                1 piece avg weight = 237g (0.237 kg) · 1 whole bird = 9 pieces.<br />
+                Current cost RM{Number(editForm.cost || 0).toFixed(2)} corresponds to chicken price RM{(Number(editForm.cost || 0) / 0.237).toFixed(2)}/kg.
+              </div>
+            )}
+            {editForm.name.toLowerCase().includes('chicken (whole)') && (
+              <div style={{ gridColumn: '1 / -1', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12, color: '#1e40af' }}>
+                <strong>🍗 Whole Chicken Cost Formula:</strong><br />
+                1 whole bird = 9 pieces (avg 2.133 kg total).<br />
+                Current cost RM{Number(editForm.cost || 0).toFixed(2)} corresponds to RM{(Number(editForm.cost || 0) / 9).toFixed(2)}/pc.
+              </div>
+            )}
+            {editForm.name.toLowerCase().includes('carcass') && (
+              <div style={{ gridColumn: '1 / -1', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12, color: '#1e40af' }}>
+                <strong>🦴 Carcass Cost Formula:</strong><br />
+                1 carcass piece avg weight = 443g (0.443 kg).<br />
+                Current cost RM{Number(editForm.cost || 0).toFixed(2)} corresponds to carcass price RM{(Number(editForm.cost || 0) / 0.443).toFixed(2)}/kg.
+              </div>
+            )}
           </div>
           <div style={{ display:'flex',gap:8,marginTop:6 }}>
             <button className="btn btn-outline" style={{ flex:1,justifyContent:'center' }} onClick={()=>{setShowEdit(false);setSelectedItem(null);}}>Cancel</button>
             <button className="btn btn-primary" style={{ flex:1,justifyContent:'center' }} onClick={handleEditStock} disabled={saving}>
               <Pencil size={14}/> {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Chicken Bill Price Calculator Modal */}
+      {showChickenCalc && (
+        <Modal title="Update Chicken Pricing from Supplier Bill" onClose={() => setShowChickenCalc(false)} maxWidth={520}>
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 14, fontSize: 12, color: '#1e40af', lineHeight: 1.5 }}>
+            <strong>🍗 How Chicken COS is Calculated:</strong><br />
+            • <strong>1 WHOLE Chicken = 9 Pieces</strong><br />
+            • <strong>1 Piece Chicken Average Weight = 237g (0.237 kg)</strong><br />
+            • The chicken KG price from your supplier bill is used to calculate the cost per piece, which directly feeds into the Cost of Sales (COS) formulas across your menu.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <FormRow label="Supplier Bill Total (RM) [Optional]">
+              <input
+                className="inp"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="e.g. 470.00"
+                value={billCostInput}
+                onChange={e => {
+                  const val = e.target.value;
+                  setBillCostInput(val);
+                  if (val && billKgInput && Number(billKgInput) > 0) {
+                    setChickenPriceInput((Number(val) / Number(billKgInput)).toFixed(2));
+                  }
+                }}
+              />
+            </FormRow>
+            <FormRow label="Total Billed Weight (KG) [Optional]">
+              <input
+                className="inp"
+                type="number"
+                step="0.1"
+                min="0"
+                placeholder="e.g. 50.0"
+                value={billKgInput}
+                onChange={e => {
+                  const val = e.target.value;
+                  setBillKgInput(val);
+                  if (billCostInput && val && Number(val) > 0) {
+                    setChickenPriceInput((Number(billCostInput) / Number(val)).toFixed(2));
+                  }
+                }}
+              />
+            </FormRow>
+          </div>
+
+          <FormRow label="Chicken Price per KG (RM)">
+            <input
+              className="inp"
+              type="number"
+              step="0.01"
+              min="0"
+              value={chickenPriceInput}
+              onChange={e => setChickenPriceInput(e.target.value)}
+              style={{ fontSize: 16, fontWeight: 700 }}
+            />
+          </FormRow>
+
+          {/* Real-time calculated outcomes */}
+          {(() => {
+            const rate = parseFloat(chickenPriceInput) || 0;
+            const pieceCost = Math.round(rate * 0.237 * 100) / 100;
+            const wholeCost = Math.round(pieceCost * 9 * 100) / 100;
+            const friedChickenCos = Math.round((pieceCost + 0.42) * 100) / 100; // 30g flour = 0.42
+
+            return (
+              <div style={{ background: '#fafafa', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', marginBottom: 8 }}>
+                  Calculated Costs & Menu Formula Impact:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center' }}>
+                  <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 6px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>1 Chicken Piece</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#2563eb' }}>RM{pieceCost.toFixed(2)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>237g avg weight</div>
+                  </div>
+                  <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 6px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>1 Whole Chicken</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#059669' }}>RM{wholeCost.toFixed(2)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>9 pieces (2.13kg)</div>
+                  </div>
+                  <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 6px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Fried Chicken COS</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#d97706' }}>RM{friedChickenCos.toFixed(2)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>+ 30g Flour (RM0.42)</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setShowChickenCalc(false)}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleApplyChickenRate} disabled={saving}>
+              {saving ? 'Applying…' : 'Apply to Chicken Inventory'}
             </button>
           </div>
         </Modal>

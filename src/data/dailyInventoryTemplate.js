@@ -55,7 +55,7 @@ export const CATEGORY_PRODUCTS = {
     { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'carcass_kg', label: 'Carcass', uom: 'KG', uomLabel: 'kg', adminOnly: true },
     { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
-    { key: 'neck', label: 'Neck', uom: 'PC', uomLabel: 'pc' },
+    { key: 'neck', label: 'Neck', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'tube_ice', label: 'Tube Ice', uom: 'BAG', uomLabel: 'bag' },
     { key: 'oil_topup_packet', label: 'Oil Top-Up (Packet)', uom: 'KG', uomLabel: 'kg' },
   ],
@@ -66,9 +66,9 @@ export const CATEGORY_PRODUCTS = {
     { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set' },
     { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
   ],
 
   remaining_fried: [
@@ -87,9 +87,9 @@ export const CATEGORY_PRODUCTS = {
 
   other_remaining: [
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PC', uomLabel: 'pc' },
-    { key: 'green_sauce', label: 'Green Sauce', uom: 'PC', uomLabel: 'pc' },
+    { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
   ]
 };
 

@@ -39,12 +39,12 @@ export const FRIED_ITEMS = [
 // ── Non-fried items: tracked through brought_to_stall → other_remaining ──
 export const NON_FRIED_ITEMS = [
     { key: 'butter_rice', label: 'Butter Rice', unit: 'set' },
-    { key: 'skin', label: 'Skin', unit: 'pc' },
-    { key: 'cheese_sauce', label: 'Cheese Sauce', unit: 'pc' },
-    { key: 'korean_sauce', label: 'Korean Sauce', unit: 'pc' },
-    { key: 'green_sauce', label: 'Green Sauce', unit: 'pc' },
-    { key: 'bbq_sauce', label: 'BBQ Sauce', unit: 'pc' },
-    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', unit: 'pc' },
+    { key: 'skin', label: 'Skin', unit: 'pcs' },
+    { key: 'cheese_sauce', label: 'Cheese Sauce', unit: 'pcs' },
+    { key: 'korean_sauce', label: 'Korean Sauce', unit: 'pcs' },
+    { key: 'green_sauce', label: 'Green Sauce', unit: 'pcs' },
+    { key: 'bbq_sauce', label: 'BBQ Sauce', unit: 'pcs' },
+    { key: 'korean_bbq_sauce', label: 'Korean BBQ Sauce', unit: 'pcs' },
 ];
 
 export const SAUCE_KEYS = ['cheese_sauce', 'korean_sauce', 'green_sauce', 'bbq_sauce', 'korean_bbq_sauce'];
@@ -168,20 +168,31 @@ export function getRawMaterialUsage(friedAndSold) {
 }
 
 /**
- * Meat weight (kg) and cost, from fried quantities.
- * `pricePerKg` = { chicken, carcass } in RM.
+ * Meat weight (kg) and cost, from fried quantities or actual Admin-entered KG from the bill.
+ * `pricePerKg` = { chicken, carcass } in RM (defaults to RM 9.40 and RM 3.50 from Excel CoS).
  */
-export function getMeatWeightCost(friedAndSold, pricePerKg = {}) {
-    const { fried } = friedAndSold;
+export function getMeatWeightCost(friedAndSold, pricePerKg = {}, dayData = null) {
+    const { fried } = friedAndSold || {};
+    const rawMaterials = dayData?.raw_materials || {};
 
-    const chickenKg = n(fried.chicken_pcs) * MEAT_AVG_WEIGHT_KG.chicken_pcs;
-    const carcassKg = n(fried.carcass_pcs) * MEAT_AVG_WEIGHT_KG.carcass_pcs;
+    // If Admin entered the actual KG from the supplier bill, use it;
+    // otherwise fallback to average weight per piece from Excel (237g chicken, 443g carcass).
+    const adminChickenKg = n(rawMaterials.chicken_kg);
+    const adminCarcassKg = n(rawMaterials.carcass_kg);
+
+    const chickenKg = adminChickenKg > 0 ? adminChickenKg : n(fried?.chicken_pcs) * MEAT_AVG_WEIGHT_KG.chicken_pcs;
+    const carcassKg = adminCarcassKg > 0 ? adminCarcassKg : n(fried?.carcass_pcs) * MEAT_AVG_WEIGHT_KG.carcass_pcs;
+
+    const chickenPrice = n(pricePerKg.chicken) || 9.40;
+    const carcassPrice = n(pricePerKg.carcass) || 3.50;
 
     return {
         chickenKg,
         carcassKg,
-        chickenCost: chickenKg * n(pricePerKg.chicken),
-        carcassCost: carcassKg * n(pricePerKg.carcass),
+        chickenCost: chickenKg * chickenPrice,
+        carcassCost: carcassKg * carcassPrice,
+        isBilledChickenKg: adminChickenKg > 0,
+        isBilledCarcassKg: adminCarcassKg > 0,
     };
 }
 
@@ -189,7 +200,7 @@ export function getMeatWeightCost(friedAndSold, pricePerKg = {}) {
 // Applied every day, including closed days (sales = 0) — matches the Excel
 // business rule, surfaced explicitly rather than silently baked in.
 export const FIXED_DAILY_COSTS = {
-    royalty: 16,
+    royalty: 10,                                  // Excel CoS row 11: RM10 / day
     rent: Math.round((600 / 31) * 100) / 100,     // RM19.35
     utilities: 10,
     wifi: Math.round((68 / 2 / 31) * 100) / 100,  // RM1.10
@@ -205,16 +216,13 @@ export function getFixedDailyCost() {
  * depends only on RecordFromStaff.
  *
  * `rawMaterialUnitCosts` = price per unit (RM) for each key returned by
- * getRawMaterialUsage(), e.g. { flourKg: 4.2, saucePackets: 0.15,
- * paperWraps: 0.08, plasticBags: 0.05, sauceContainers: 0.1, riceKg: 3,
- * butterKg: 12, milkKg: 6, riceContainers: 0.2, soupContainers: 0.2,
- * glovesUnits: 0.1, gasKg: 2.5 }
+ * getRawMaterialUsage().
  * `meatPricePerKg` = { chicken, carcass } in RM.
  */
 export function getDailyCostOfSales(dayData, rawMaterialUnitCosts = {}, meatPricePerKg = {}) {
     const friedAndSold = getFriedAndSoldQuantities(dayData);
     const usage = getRawMaterialUsage(friedAndSold);
-    const meat = getMeatWeightCost(friedAndSold, meatPricePerKg);
+    const meat = getMeatWeightCost(friedAndSold, meatPricePerKg, dayData);
     const fixedCost = getFixedDailyCost();
 
     let rawMaterialTotal = 0;
