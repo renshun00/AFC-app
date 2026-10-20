@@ -998,7 +998,10 @@ export default function StaffDashboardPage({ isMobile }) {
 
   // Load staff member's shift for today
   const loadStaffShift = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || isAdminUser) {
+      setShiftLoading(false);
+      return;
+    }
     try {
       setShiftLoading(true);
       // First check if there is an active open shift
@@ -1642,117 +1645,119 @@ export default function StaffDashboardPage({ isMobile }) {
   return (
     <div>
       {/* ──── Top Staff Attendance (Check In / Check Out) Banner ──── */}
-      <div style={{
-        background: '#fff',
-        borderRadius: 'var(--radius)',
-        border: '1px solid var(--border)',
-        padding: '16px 20px',
-        marginBottom: 20,
-        boxShadow: 'var(--shadow-sm)',
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        alignItems: isMobile ? 'stretch' : 'center',
-        justifyContent: 'space-between',
-        gap: 16,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: 12,
-            background: isShiftOpen ? 'var(--green-light)' : 'var(--primary-light)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: isShiftOpen ? '#15803d' : 'var(--primary)',
-            flexShrink: 0
-          }}>
-            <Clock size={22} />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
-                {profile?.name || 'Staff Member'}
-              </span>
-              <span style={{
-                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: isShiftOpen ? '#dcfce7' : '#f4f4f5',
-                color: isShiftOpen ? '#15803d' : '#71717a'
-              }}>
-                {isShiftOpen ? '● On Duty' : '○ Not Clocked In'}
-              </span>
+      {!isAdminUser && (
+        <div style={{
+          background: '#fff',
+          borderRadius: 'var(--radius)',
+          border: '1px solid var(--border)',
+          padding: '16px 20px',
+          marginBottom: 20,
+          boxShadow: 'var(--shadow-sm)',
+          display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: isShiftOpen ? 'var(--green-light)' : 'var(--primary-light)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: isShiftOpen ? '#15803d' : 'var(--primary)',
+              flexShrink: 0
+            }}>
+              <Clock size={22} />
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span>Shift: <strong>{clockInDisplay || 'Not checked in'}</strong> {clockOutDisplay ? `→ ${clockOutDisplay}` : (isShiftOpen ? '→ Active' : '')}</span>
-              {isShiftOpen && activeShift?.clockIn?.toDate && (
-                <span style={{ color: '#16a34a', fontWeight: 600 }}>
-                  (Started {activeShift.clockIn.toDate().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })})
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+                  {profile?.name || 'Staff Member'}
                 </span>
-              )}
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                  background: isShiftOpen ? '#dcfce7' : '#f4f4f5',
+                  color: isShiftOpen ? '#15803d' : '#71717a'
+                }}>
+                  {isShiftOpen ? '● On Duty' : '○ Not Clocked In'}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span>Shift: <strong>{clockInDisplay || 'Not checked in'}</strong> {clockOutDisplay ? `→ ${clockOutDisplay}` : (isShiftOpen ? '→ Active' : '')}</span>
+                {isShiftOpen && activeShift?.clockIn?.toDate && (
+                  <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                    (Started {activeShift.clockIn.toDate().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })})
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            type="button"
-            className="btn"
-            disabled={isShiftOpen || shiftLoading}
-            onClick={() => {
-              setAttendanceModal('checkIn');
-              setVerifyPassword('');
-              setVerifyError('');
-              setShowVerifyPassword(false);
-            }}
-            style={{
-              background: isShiftOpen ? '#f4f4f5' : '#16a34a',
-              color: isShiftOpen ? '#a1a1aa' : '#fff',
-              border: 'none',
-              padding: '10px 18px',
-              fontWeight: 700,
-              fontSize: 13,
-              borderRadius: 'var(--radius-sm)',
-              cursor: isShiftOpen ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              boxShadow: isShiftOpen ? 'none' : '0 2px 6px rgba(22, 163, 74, 0.25)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <LogIn size={16} /> Check In
-          </button>
+          {/* Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={isShiftOpen || shiftLoading}
+              onClick={() => {
+                setAttendanceModal('checkIn');
+                setVerifyPassword('');
+                setVerifyError('');
+                setShowVerifyPassword(false);
+              }}
+              style={{
+                background: isShiftOpen ? '#f4f4f5' : '#16a34a',
+                color: isShiftOpen ? '#a1a1aa' : '#fff',
+                border: 'none',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: 13,
+                borderRadius: 'var(--radius-sm)',
+                cursor: isShiftOpen ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: isShiftOpen ? 'none' : '0 2px 6px rgba(220, 38, 38, 0.25)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <LogIn size={16} /> Check In
+            </button>
 
-          <button
-            type="button"
-            className="btn"
-            disabled={!isShiftOpen || shiftLoading}
-            onClick={() => {
-              setAttendanceModal('checkOut');
-              setVerifyPassword('');
-              setVerifyError('');
-              setShowVerifyPassword(false);
-            }}
-            style={{
-              background: !isShiftOpen ? '#f4f4f5' : '#dc2626',
-              color: !isShiftOpen ? '#a1a1aa' : '#fff',
-              border: 'none',
-              padding: '10px 18px',
-              fontWeight: 700,
-              fontSize: 13,
-              borderRadius: 'var(--radius-sm)',
-              cursor: !isShiftOpen ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              boxShadow: !isShiftOpen ? 'none' : '0 2px 6px rgba(220, 38, 38, 0.25)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <LogOut size={16} /> Check Out
-          </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!isShiftOpen || shiftLoading}
+              onClick={() => {
+                setAttendanceModal('checkOut');
+                setVerifyPassword('');
+                setVerifyError('');
+                setShowVerifyPassword(false);
+              }}
+              style={{
+                background: !isShiftOpen ? '#f4f4f5' : '#dc2626',
+                color: !isShiftOpen ? '#a1a1aa' : '#fff',
+                border: 'none',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: 13,
+                borderRadius: 'var(--radius-sm)',
+                cursor: !isShiftOpen ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: !isShiftOpen ? 'none' : '0 2px 6px rgba(220, 38, 38, 0.25)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <LogOut size={16} /> Check Out
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Attendance Notification banner if available */}
-      {attendanceMsg && (
+      {!isAdminUser && attendanceMsg && (
         <div style={{
           background: attendanceMsg.type === 'success' ? '#f0fdf4' : '#fef2f2',
           border: `1px solid ${attendanceMsg.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
@@ -1772,7 +1777,7 @@ export default function StaffDashboardPage({ isMobile }) {
       )}
 
       {/* ──── Password Verification Modal for Check In / Out ──── */}
-      {attendanceModal && (
+      {!isAdminUser && attendanceModal && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(0, 0, 0, 0.5)',

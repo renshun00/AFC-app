@@ -21,8 +21,7 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['favicon.png', 'afc_logo.jpg', 'offline.html', 'clear-cache.html', 'tng_qr_placeholder.svg', 'icons/*.png'],
       devOptions: {
-        enabled: true,
-        type: 'module',
+        enabled: false,
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,jpg,jpeg,ico,woff,woff2}'],

@@ -2,10 +2,11 @@ import {
   ClipboardList, ShoppingCart, Package, Wrench,
   Users, BarChart2, FileText, Settings,
   X, Menu, ChevronDown, Bell, LogOut, Truck,
+  LayoutDashboard,
 } from 'lucide-react';
 
-const NAV = [
-  { key: 'dashboard', label: 'Daily Inventory', icon: ClipboardList },
+const ADMIN_NAV = [
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart },
   { key: 'inventory', label: 'Inventory', icon: Package },
   { key: 'suppliers', label: 'Suppliers', icon: Truck },
@@ -14,13 +15,20 @@ const NAV = [
   { key: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
+const STAFF_NAV = [
+  { key: 'dashboard', label: 'Daily Inventory', icon: ClipboardList },
+  { key: 'pos', label: 'Point of Sale', icon: ShoppingCart },
+  { key: 'inventory', label: 'Inventory', icon: Package },
+];
+
 const ROLE_COLORS = {
   Admin: { bg: '#fde8e4', color: '#c0392b' },
   Staff: { bg: '#eff6ff', color: '#1d4ed8' },
 };
 
 export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, userRole }) {
-  const allowed = allowedPages || NAV.map(n => n.key);
+  const navList = userRole === 'Admin' ? ADMIN_NAV : STAFF_NAV;
+  const allowed = allowedPages || navList.map(n => n.key);
 
   return (
     <>
@@ -67,7 +75,7 @@ export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, 
 
         {/* Nav — only show pages the role can access */}
         <nav style={{ flex: 1, padding: '0 10px', overflowY: 'auto' }}>
-          {NAV.filter(n => allowed.includes(n.key)).map(({ key, label, icon: Icon }) => {
+          {navList.filter(n => allowed.includes(n.key)).map(({ key, label, icon: Icon }) => {
             const active = page === key;
             return (
               <button key={key}
@@ -121,13 +129,17 @@ export function Sidebar({ page, setPage, open, onClose, isMobile, allowedPages, 
 
 export function TopBar({ page, isMobile, onMenuClick, onLogout, userName, userRole }) {
   const labels = {
-    dashboard: 'Daily Inventory Log', pos: 'Point of Sale',
-    inventory: 'Inventory Management', menu: 'Menu Engineering',
-    staff: 'Staff & Payroll Operations', daily: 'Daily Reconciliation',
-    reports: 'Reports & Analytics', suppliers: 'Supplier Management',
+    dashboard: userRole === 'Admin' ? 'Admin Dashboard' : 'Daily Inventory Log',
+    pos: 'Point of Sale',
+    inventory: 'Inventory Management',
+    menu: 'Menu Engineering',
+    staff: 'Staff & Payroll Operations',
+    daily: 'Daily Reconciliation',
+    reports: 'Reports & Analytics',
+    suppliers: 'Supplier Management',
   };
   const subs = {
-    dashboard: 'Record daily stock levels across all categories.',
+    dashboard: userRole === 'Admin' ? 'Overview of sales, inventory, and operations.' : 'Record daily stock levels across all categories.',
     pos: 'Manage orders and process sales.',
     inventory: 'Track stock levels and materials.',
     menu: 'Manage menu items, pricing and costs.',

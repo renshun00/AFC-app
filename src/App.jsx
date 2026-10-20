@@ -83,7 +83,7 @@ export default function App() {
       case 'staff':     return <StaffPayrollPage {...props} />;
       case 'daily':     return <DailyReportPage {...props} />;
       case 'reports':   return <ReportsPage {...props} />;
-      default:          return <DashboardPage {...props} userRole={userRole} />;
+      default:          return <DashboardPage {...props} navigate={navigate} userRole={userRole} />;
     }
   };
 

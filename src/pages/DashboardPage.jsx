@@ -1,14 +1,16 @@
 import React from 'react';
 import StaffDashboardPage from './StaffDashboardPage';
+import AdminDashboardPage from './AdminDashboardPage';
 
 /**
- * DashboardPage — daily inventory input form for every role.
- *
- * Admin and Staff both see the same page. Admin-only controls (e.g. the
- * "Re-apply to Inventory" button and the Admin Bill KG fields) are gated
- * inside StaffDashboardPage via the logged-in profile's role.
- * (AdminDashboardPage.jsx, the analytics view, is kept but no longer routed here.)
+ * DashboardPage dispatcher:
+ * - Admin: Admin Dashboard view (analytics, KPIs, sales charts, locked accounts, quick actions).
+ * - Staff: Staff Daily Inventory view.
  */
-export default function DashboardPage({ isMobile }) {
+export default function DashboardPage({ isMobile, navigate, userRole }) {
+  if (userRole === 'Admin') {
+    return <AdminDashboardPage isMobile={isMobile} navigate={navigate} />;
+  }
   return <StaffDashboardPage isMobile={isMobile} />;
 }
+

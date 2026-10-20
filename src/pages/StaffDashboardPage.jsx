@@ -998,7 +998,10 @@ export default function StaffDashboardPage({ isMobile }) {
 
   // Load staff member's shift for today
   const loadStaffShift = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || isAdminUser) {
+      setShiftLoading(false);
+      return;
+    }
     try {
       setShiftLoading(true);
       // First check if there is an active open shift
@@ -1642,7 +1645,8 @@ export default function StaffDashboardPage({ isMobile }) {
   return (
     <div>
       {/* ──── Top Staff Attendance (Check In / Check Out) Banner ──── */}
-      <div style={{
+      {!isAdminUser && (
+        <div style={{
         background: '#fff',
         borderRadius: 'var(--radius)',
         border: '1px solid var(--border)',
@@ -1750,9 +1754,10 @@ export default function StaffDashboardPage({ isMobile }) {
           </button>
         </div>
       </div>
+      )}
 
       {/* Attendance Notification banner if available */}
-      {attendanceMsg && (
+      {!isAdminUser && attendanceMsg && (
         <div style={{
           background: attendanceMsg.type === 'success' ? '#f0fdf4' : '#fef2f2',
           border: `1px solid ${attendanceMsg.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
@@ -1772,7 +1777,7 @@ export default function StaffDashboardPage({ isMobile }) {
       )}
 
       {/* ──── Password Verification Modal for Check In / Out ──── */}
-      {attendanceModal && (
+      {!isAdminUser && attendanceModal && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(0, 0, 0, 0.5)',
