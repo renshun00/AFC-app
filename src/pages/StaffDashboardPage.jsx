@@ -6,9 +6,9 @@ import {
   ArrowLeft, ClipboardList, FileDown, History,
   LogIn, LogOut, KeyRound, Eye, EyeOff, Lock, Check,
   Calculator, RotateCcw, AlertTriangle, Sparkles, Info,
-  TrendingUp, CheckCircle,
+  TrendingUp, CheckCircle, PackageCheck,
 } from 'lucide-react';
-import { dailyInventoryService, staffShiftService, staffService } from '../services/firestoreService';
+import { dailyInventoryService, staffShiftService, staffService, salesOrderService } from '../services/firestoreService';
 import {
   CATEGORIES,
   CATEGORY_PRODUCTS,
@@ -19,6 +19,7 @@ import {
   getFriedAndSoldQuantities,
   calculateBroughtToStall,
   calculateFriedLeftoverPenalty,
+  computeAutoRemainders,
   getPreviousTradingDate,
   shiftDate,
   FRIED_ITEMS,
@@ -91,13 +92,19 @@ function CategorySection({
   isOpen,
   onToggle,
   isSubmitted,
+  isAdmin,
   isSaturday,
   isSunday,
   prevTradingDate,
   prevDayData,
   rawMaterials,
   onRecalculateBrought,
+  onSendStockToInventory,
+  stockReceivedSynced,
+  stockSending,
   friedPenalty,
+  chickenCutYield,
+  onCutYieldChange,
 }) {
   const CatIcon = CATEGORY_ICONS[category.key] || Package;
   const filledCount = products.filter(p => (values[p.key] ?? 0) > 0).length;
@@ -180,20 +187,48 @@ function CategorySection({
                   {isSaturday
                     ? 'Saturday Closed: Stall is closed today. Brought to stall pieces are formula-set to 0.'
                     : (isSunday
-                        ? `Sunday Trading: Automatically carrying over Friday's unfried leftovers (${prevTradingDate || 'Friday'}).`
-                        : 'Excel Formula Flow: Chicken & Carcass Brought to Stall = Yesterday\'s Unfried + Today\'s Received.')}
+                      ? `Sunday Trading: Automatically carrying over Friday's unfried leftovers (${prevTradingDate || 'Friday'}).`
+                      : 'Excel Formula Flow: Chicken & Carcass Brought to Stall = Yesterday\'s Unfried + Today\'s Received.')}
                 </span>
               </div>
-              {!isSubmitted && (
-                <button
-                  type="button"
-                  onClick={onRecalculateBrought}
-                  className="btn btn-outline btn-sm"
-                  style={{ fontSize: 11, padding: '4px 10px', gap: 5, background: '#fff' }}
-                  title="Re-run Excel formulas to prefill brought items"
-                >
-                  <RotateCcw size={12} /> Re-sync Formulas
-                </button>
+              {!isSubmitted ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={onRecalculateBrought}
+                    className="btn btn-outline btn-sm"
+                    style={{ fontSize: 11, padding: '4px 10px', gap: 5, background: '#fff' }}
+                    title="Re-run Excel formulas to prefill brought items"
+                  >
+                    <RotateCcw size={12} /> Re-sync Formulas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSendStockToInventory}
+                    disabled={stockSending}
+                    className="btn btn-sm"
+                    style={{
+                      fontSize: 11, padding: '4px 10px', gap: 5,
+                      background: stockReceivedSynced ? '#15803d' : '#0284c7',
+                      color: '#fff', border: 'none', fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                    title="Send today's received raw materials and brought stock to inventory for live POS deduction"
+                  >
+                    {stockSending ? (
+                      <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : stockReceivedSynced ? (
+                      <PackageCheck size={12} />
+                    ) : (
+                      <Truck size={12} />
+                    )}
+                    {stockReceivedSynced ? 'Stock Sent to Inventory ✓' : 'Send to Inventory'}
+                  </button>
+                </div>
+              ) : (
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '3px 8px', borderRadius: 6 }}>
+                  ✓ Stock Finalized
+                </span>
               )}
             </div>
           )}
@@ -294,6 +329,9 @@ function CategorySection({
               }
             }
 
+            const isAdminBillKgField = category.key === 'raw_materials' && (prod.key === 'chicken_kg' || prod.key === 'carcass_kg');
+            const isDisabled = isSubmitted && !(isAdmin && isAdminBillKgField);
+
             return (
               <div
                 key={prod.key}
@@ -308,13 +346,54 @@ function CategorySection({
                   <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                     <span>{prod.label}</span>
                     {prod.adminOnly && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: 4 }}>
-                        Admin Bill KG
+                      <span style={{
+                        fontSize: 9, fontWeight: 700,
+                        color: isSubmitted && isAdmin ? '#92400e' : '#b45309',
+                        background: '#fef3c7',
+                        border: isSubmitted && isAdmin ? '1px solid #fde68a' : 'none',
+                        padding: '1px 5px', borderRadius: 4
+                      }}>
+                        {isSubmitted && isAdmin ? 'Admin Bill KG (Editable)' : 'Admin Bill KG'}
+                      </span>
+                    )}
+                    {category.key === 'raw_materials' && prod.key === 'chicken_whole' && !isSubmitted && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>Yield:</span>
+                        <button
+                          type="button"
+                          onClick={() => onCutYieldChange?.(9)}
+                          style={{
+                            fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                            background: (chickenCutYield || 9) === 9 ? '#2563eb' : '#f4f4f5',
+                            color: (chickenCutYield || 9) === 9 ? '#fff' : 'var(--text-2)',
+                            border: '1px solid ' + ((chickenCutYield || 9) === 9 ? '#1d4ed8' : '#d4d4d8'),
+                            cursor: 'pointer'
+                          }}
+                          title="Standard 9 pieces per whole chicken"
+                        >
+                          9 pcs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onCutYieldChange?.(8)}
+                          style={{
+                            fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                            background: (chickenCutYield || 9) === 8 ? '#d97706' : '#f4f4f5',
+                            color: (chickenCutYield || 9) === 8 ? '#fff' : 'var(--text-2)',
+                            border: '1px solid ' + ((chickenCutYield || 9) === 8 ? '#b45309' : '#d4d4d8'),
+                            cursor: 'pointer'
+                          }}
+                          title="Alternative 8 pieces per whole chicken"
+                        >
+                          8 pcs
+                        </button>
                       </span>
                     )}
                     {category.key === 'raw_materials' && prod.key === 'chicken_pcs' && (
                       <span style={{ fontSize: 9, fontWeight: 700, color: '#3b82f6', background: '#eff6ff', padding: '1px 5px', borderRadius: 4 }}>
-                        1 whole = 9 pcs
+                        {Number(rawMaterials?.chicken_whole || 0) > 0 && Number(values[prod.key] || 0) > 0
+                          ? `${(Number(values[prod.key]) / Number(rawMaterials.chicken_whole)).toFixed(1).replace('.0', '')} pcs/whole (Editable)`
+                          : `${chickenCutYield || 9} pcs/whole (Editable)`}
                       </span>
                     )}
                     {prod.isCalculated && (
@@ -357,18 +436,18 @@ function CategorySection({
                     min="0"
                     value={values[prod.key] ?? ''}
                     onChange={e => onChange(prod.key, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                    disabled={isSubmitted}
+                    disabled={isDisabled}
                     placeholder="0"
                     style={{
                       width: '100%', padding: '7px 8px',
-                      border: `1.5px solid ${formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : 'var(--border)'}`,
+                      border: `1.5px solid ${formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : (isAdminBillKgField && isSubmitted && isAdmin ? '#f59e0b' : 'var(--border)')}`,
                       borderRadius: 8, fontSize: 13, fontWeight: 600,
                       textAlign: 'right', fontFamily: 'var(--font)',
-                      color: 'var(--text-1)', background: isSubmitted ? '#fafafa' : (formulaInfo && !formulaInfo.isOverridden ? '#faf5ff' : '#fff'),
+                      color: 'var(--text-1)', background: isDisabled ? '#fafafa' : (formulaInfo && !formulaInfo.isOverridden ? '#faf5ff' : '#fff'),
                       outline: 'none', transition: 'border-color 0.15s',
                     }}
-                    onFocus={e => { if (!isSubmitted) e.target.style.borderColor = category.color; }}
-                    onBlur={e => { e.target.style.borderColor = formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : 'var(--border)'; }}
+                    onFocus={e => { if (!isDisabled) e.target.style.borderColor = category.color; }}
+                    onBlur={e => { e.target.style.borderColor = formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : (isAdminBillKgField && isSubmitted && isAdmin ? '#f59e0b' : 'var(--border)'); }}
                   />
                 </div>
               </div>
@@ -382,13 +461,13 @@ function CategorySection({
 
 // ── Daily Reconciliation (ProductInventory) Panel ──────────────────────────
 
-function DailyReconciliationPanel({ formData, isMobile }) {
-  const friedAndSold = useMemo(() => getFriedAndSoldQuantities(formData), [formData]);
+function DailyReconciliationPanel({ formData, isMobile, posSummary, onAutofillFromPos, isSubmitted }) {
   const brought = formData.brought_to_stall || {};
-  const remUnfried = formData.remaining_unfried || {};
   const remFried = formData.remaining_fried || {};
-  const otherRem = formData.other_remaining || {};
   const [isOpen, setIsOpen] = useState(true);
+
+  const hasPos = (posSummary?.orderCount || 0) > 0;
+  const posSold = posSummary?.soldBreakdown || {};
 
   return (
     <div style={{
@@ -407,22 +486,29 @@ function DailyReconciliationPanel({ formData, isMobile }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 34, height: 34, borderRadius: 8,
-            background: 'rgba(22, 163, 74, 0.12)', color: '#16a34a',
+            background: hasPos ? 'rgba(37, 99, 235, 0.12)' : 'rgba(22, 163, 74, 0.12)',
+            color: hasPos ? '#2563eb' : '#16a34a',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <TrendingUp size={18} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>
-                Live Reconciliation (ProductInventory)
+                Live POS Reconciliation & Carryover Audit
               </span>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: '#dcfce7', color: '#15803d' }}>
-                Excel Formulas
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: hasPos ? '#dbeafe' : '#f1f5f9',
+                color: hasPos ? '#1d4ed8' : '#64748b',
+              }}>
+                {hasPos ? `POS Live Connected (${posSummary.orderCount} orders)` : 'Awaiting POS Orders'}
               </span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-              Fried = Brought − Unfried &nbsp;|&nbsp; Sold = Fried − Left Fried
+              {hasPos
+                ? `POS Sales: RM ${posSummary.totalRevenue.toFixed(2)} · ${posSummary.soldBreakdown?.chicken_pcs || 0} chicken pcs sold · Raw carryover auto-calculated`
+                : 'Raw Uncooked Carryover = Brought − POS Sold − Unsold Fried (Waste)'}
             </div>
           </div>
         </div>
@@ -433,38 +519,102 @@ function DailyReconciliationPanel({ formData, isMobile }) {
 
       {isOpen && (
         <div style={{ padding: '0 18px 16px', borderTop: '1px solid var(--border-soft)' }}>
-          <div style={{ overflowX: 'auto' }}>
+          {/* POS Status Banner */}
+          {hasPos ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+              padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8,
+              marginTop: 12, marginBottom: 14,
+            }}>
+              <div style={{ fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle2 size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+                <span>
+                  <strong>POS Live Linked ({posSummary.orderCount} orders):</strong> Chicken sold on POS is auto-deducted. Evening staff only counts <strong>Baki Dah Goreng (Unsold Fried)</strong>; raw uncooked pieces automatically carry over to tomorrow.
+                </span>
+              </div>
+              {!isSubmitted && (
+                <button
+                  type="button"
+                  onClick={onAutofillFromPos}
+                  className="btn btn-sm"
+                  style={{
+                    background: '#16a34a', color: '#fff', border: 'none', fontWeight: 700,
+                    fontSize: 11, padding: '5px 12px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+                    cursor: 'pointer',
+                  }}
+                  title="Re-sync raw carryover and non-fried remainders from latest POS orders"
+                >
+                  <Sparkles size={13} /> Re-sync Remainders
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+              padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8,
+              marginTop: 12, marginBottom: 14,
+            }}>
+              <div style={{ fontSize: 12, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Info size={16} style={{ color: '#2563eb', flexShrink: 0 }} />
+                <span>
+                  <strong>Morning Setup Mode:</strong> No POS sales recorded yet for today. Prepared stock is ready; once orders are rung up, live sales will reconcile here automatically.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Fried Items Reconciliation Table */}
+          <div style={{ overflowX: 'auto', marginTop: 8 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', color: 'var(--text-3)', textAlign: 'right' }}>
                   <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 700 }}>Item</th>
-                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Brought</th>
-                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Uncooked Left</th>
-                  <th style={{ padding: '8px 6px', fontWeight: 700, color: 'var(--primary)' }}>Fried Qty</th>
-                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Fried Left</th>
-                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#15803d' }}>Units Sold</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Brought to Stall</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#2563eb' }}>POS Sold</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#7c3aed' }}>Total Remainder</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#dc2626' }}>Unsold Fried (Waste)</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#16a34a' }}>Raw Uncooked (Carryover)</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, textAlign: 'center' }}>Waste Status</th>
                 </tr>
               </thead>
               <tbody>
                 {FRIED_ITEMS.map((item) => {
                   const broughtQty = Number(brought[item.broughtKey] || 0);
-                  const unfriedQty = Number(remUnfried[item.remainingKey] || 0);
-                  const friedQty = Math.max(0, broughtQty - unfriedQty);
+                  const posKey = item.key === 'neck' ? 'chicken_neck_set' : item.key;
+                  const soldCount = Number(posSold[posKey] || 0);
+                  const totalRem = Math.max(0, broughtQty - soldCount);
                   const leftFriedQty = Number(remFried[item.remainingKey] || 0);
-                  const soldQty = Math.max(0, friedQty - leftFriedQty);
+                  const unfriedQty = Math.max(0, totalRem - leftFriedQty);
 
                   return (
                     <tr key={item.key} style={{ borderBottom: '1px solid var(--border-soft)', textAlign: 'right' }}>
                       <td style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600, color: 'var(--text-1)' }}>
                         {item.label} <span style={{ fontSize: 10, color: 'var(--text-3)' }}>({item.unit})</span>
                       </td>
-                      <td style={{ padding: '8px 6px', color: 'var(--text-2)' }}>{broughtQty}</td>
-                      <td style={{ padding: '8px 6px', color: 'var(--text-3)' }}>− {unfriedQty}</td>
-                      <td style={{ padding: '8px 6px', fontWeight: 700, color: 'var(--primary)' }}>= {friedQty}</td>
-                      <td style={{ padding: '8px 6px', color: leftFriedQty > 0 ? '#ef4444' : 'var(--text-3)' }}>
-                        − {leftFriedQty}
+                      <td style={{ padding: '8px 6px', color: 'var(--text-2)', fontWeight: 600 }}>{broughtQty}</td>
+                      <td style={{ padding: '8px 6px', color: '#2563eb', fontWeight: 700 }}>− {soldCount}</td>
+                      <td style={{ padding: '8px 6px', color: '#7c3aed', fontWeight: 700 }}>= {totalRem}</td>
+                      <td style={{ padding: '8px 6px', color: leftFriedQty > 0 ? '#dc2626' : 'var(--text-3)', fontWeight: 700 }}>
+                        {leftFriedQty}
                       </td>
-                      <td style={{ padding: '8px 6px', fontWeight: 700, color: '#15803d' }}>= {soldQty}</td>
+                      <td style={{ padding: '8px 6px', color: '#16a34a', fontWeight: 700 }}>
+                        {unfriedQty} <span style={{ fontSize: 9, color: 'var(--text-3)' }}>({item.unit})</span>
+                      </td>
+                      <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                        {leftFriedQty >= 5 && (item.key === 'chicken_pcs' || item.key === 'carcass_pcs') ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', background: '#fee2e2', padding: '2px 6px', borderRadius: 4 }} title="Leftover fried chicken ≥ 5 pcs incurs payroll penalty (RM 2.50/staff)">
+                            ⚠️ ≥5 Penalty
+                          </span>
+                        ) : leftFriedQty > 0 ? (
+                          <span style={{ fontSize: 10, fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '2px 6px', borderRadius: 4 }}>
+                            {leftFriedQty} waste
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '2px 6px', borderRadius: 4 }}>
+                            ✓ 0 Waste
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -472,23 +622,270 @@ function DailyReconciliationPanel({ formData, isMobile }) {
             </table>
           </div>
 
+          {/* Non-fried items section */}
           <div style={{
-            marginTop: 12, padding: '10px 12px', borderRadius: 8,
+            marginTop: 14, padding: '10px 12px', borderRadius: 8,
             background: '#f8fafc', border: '1px solid #e2e8f0',
             fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center',
             justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
           }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={13} color="var(--primary)" /> Non-fried items (Rice, Kulit, Sauces): Sold = Brought − Other Remaining
+              <Info size={13} color="var(--primary)" />
+              Non-fried goods (Butter Rice & Sauces) auto-deducted via POS sales:
             </span>
             <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>
-              Nasi Sold: {Math.max(0, Number(brought.butter_rice || 0) - Number(otherRem.butter_rice || 0))} sets &nbsp;|&nbsp;
-              Kulit Sold: {Math.max(0, Number(brought.skin || 0) - Number(otherRem.skin || 0))} pcs &nbsp;|&nbsp;
-              Sauces Sold: {Math.max(0, Number(brought.cheese_sauce || 0) - Number(otherRem.cheese_sauce || 0)) +
-                           Math.max(0, Number(brought.korean_sauce || 0) - Number(otherRem.korean_sauce || 0)) +
-                           Math.max(0, Number(brought.green_sauce || 0) - Number(otherRem.green_sauce || 0)) +
-                           Math.max(0, Number(brought.bbq_sauce || 0) - Number(otherRem.bbq_sauce || 0))} pcs
+              Nasi: {brought.butter_rice || 0} brought − {posSold.butter_rice || 0} sold = {Math.max(0, Number(brought.butter_rice || 0) - Number(posSold.butter_rice || 0))} remain &nbsp;|&nbsp;
+              Sauces: {(Number(brought.cheese_sauce || 0) + Number(brought.korean_sauce || 0) + Number(brought.green_sauce || 0) + Number(brought.bbq_sauce || 0))} brought − {(Number(posSold.cheese_sauce || 0) + Number(posSold.korean_sauce || 0) + Number(posSold.green_sauce || 0) + Number(posSold.bbq_sauce || 0))} sold = {
+                Math.max(0, Number(brought.cheese_sauce || 0) - Number(posSold.cheese_sauce || 0)) +
+                Math.max(0, Number(brought.korean_sauce || 0) - Number(posSold.korean_sauce || 0)) +
+                Math.max(0, Number(brought.green_sauce || 0) - Number(posSold.green_sauce || 0)) +
+                Math.max(0, Number(brought.bbq_sauce || 0) - Number(posSold.bbq_sauce || 0))
+              } remain
             </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Auto-filled POS Remainders & Carryover Section ──────────────────────────
+
+function AutoRemaindersSection({ formData, posSummary, onAutofillFromPos, isSubmitted }) {
+  const [isOpen, setIsOpen] = useState(true);
+  const brought = formData.brought_to_stall || {};
+  const remFried = formData.remaining_fried || {};
+  const hasPos = (posSummary?.orderCount || 0) > 0;
+  const posSold = posSummary?.soldBreakdown || {};
+
+  const liveAuto = computeAutoRemainders(brought, remFried, posSold);
+  const remUnfried = hasPos ? liveAuto.remaining_unfried : (formData.remaining_unfried || liveAuto.remaining_unfried);
+  const otherRem = hasPos ? liveAuto.other_remaining : (formData.other_remaining || liveAuto.other_remaining);
+
+  return (
+    <div style={{
+      background: '#fff', borderRadius: 'var(--radius)',
+      border: '1.5px solid #16a34a40',
+      boxShadow: isOpen ? '0 0 0 3px rgba(22, 163, 74, 0.08)' : 'var(--shadow-sm)',
+      transition: 'all 0.2s ease', overflow: 'hidden', marginBottom: 16,
+    }}>
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+          padding: '16px 18px', border: 'none', background: 'transparent',
+          cursor: 'pointer', fontFamily: 'var(--font)', textAlign: 'left',
+        }}
+      >
+        <div style={{
+          width: 38, height: 38, borderRadius: 10,
+          background: 'rgba(22, 163, 74, 0.12)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', color: '#16a34a', flexShrink: 0,
+        }}>
+          <Sparkles size={20} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+              Auto-filled POS Remainders & Carryover
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+              (Baki Auto dari POS)
+            </span>
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+              <CheckCircle2 size={11} /> Auto-Calculated
+            </span>
+            {hasPos && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe',
+              }}>
+                POS Synced ({posSummary.orderCount} order{posSummary.orderCount > 1 ? 's' : ''})
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+            Unsold raw pieces carry over to tomorrow's Brought to Stall; unsold sauces & rice remain in stall.
+          </div>
+        </div>
+        <div style={{ color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          <ChevronRight size={18} />
+        </div>
+      </button>
+
+      {isOpen && (
+        <div style={{ padding: '0 18px 18px', borderTop: '1px solid var(--border-soft)' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+            padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8,
+            marginTop: 12, marginBottom: 16,
+          }}>
+            <div style={{ fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Info size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+              <span>
+                <strong>Automated End-of-Day Remainders:</strong> Deducted live via POS sales. No manual counting needed for raw carryover, rice, or sauces.
+              </span>
+            </div>
+            {!isSubmitted && (
+              <button
+                type="button"
+                onClick={onAutofillFromPos}
+                className="btn btn-sm"
+                style={{
+                  background: '#16a34a', color: '#fff', border: 'none', fontWeight: 700,
+                  fontSize: 11, padding: '5px 12px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+                  cursor: 'pointer',
+                }}
+                title="Recalculate remainders with latest POS sales"
+              >
+                <Sparkles size={13} /> Re-sync from POS
+              </button>
+            )}
+          </div>
+
+          {/* Subheading: Raw Uncooked Carryover */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{
+              fontSize: 12, fontWeight: 700, color: '#15803d', textTransform: 'uppercase',
+              letterSpacing: '0.05em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6
+            }}>
+              <span>🍗 Raw Uncooked Stock (Carryover to Tomorrow's Stall)</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+              {/* Chicken Pieces */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Chicken (Pieces)</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>
+                    {remUnfried.chicken_pcs ?? 0} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.chicken_pcs || 0} brought − {posSold.chicken_pcs || 0} sold {Number(remFried.chicken_pcs || 0) > 0 ? `− ${remFried.chicken_pcs} fried waste` : ''}
+                </div>
+              </div>
+
+              {/* Carcass */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Carcass</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>
+                    {remUnfried.carcass_pcs ?? 0} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.carcass_pcs || 0} brought − {posSold.carcass_pcs || 0} sold {Number(remFried.carcass_pcs || 0) > 0 ? `− ${remFried.carcass_pcs} fried waste` : ''}
+                </div>
+              </div>
+
+              {/* Neck */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Chicken Neck (4 pcs)</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>
+                    {remUnfried.neck ?? 0} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>set</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.chicken_neck_set || 0} brought − {posSold.chicken_neck_set || 0} sold
+                </div>
+              </div>
+
+              {/* Mushroom */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Mushroom</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>
+                    {remUnfried.mushroom ?? 0} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>set</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.mushroom || 0} brought − {posSold.mushroom || 0} sold
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Subheading: Non-Fried Goods Remaining */}
+          <div>
+            <div style={{
+              fontSize: 12, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase',
+              letterSpacing: '0.05em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6
+            }}>
+              <span>🍚 Non-Fried Inventory (Remaining in Stall)</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+              {/* Butter Rice */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Butter Rice</span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
+                    {otherRem.butter_rice ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>set</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.butter_rice || 0} brought − {posSold.butter_rice || 0} sold
+                </div>
+              </div>
+
+              {/* Cheese Sauce */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Cheese Sauce</span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
+                    {otherRem.cheese_sauce ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.cheese_sauce || 0} brought − {posSold.cheese_sauce || 0} sold
+                </div>
+              </div>
+
+              {/* Korean Sauce */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Korean Sauce</span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
+                    {otherRem.korean_sauce ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.korean_sauce || 0} brought − {posSold.korean_sauce || 0} sold
+                </div>
+              </div>
+
+              {/* Green Sauce */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Green Sauce</span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
+                    {otherRem.green_sauce ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.green_sauce || 0} brought − {posSold.green_sauce || 0} sold
+                </div>
+              </div>
+
+              {/* BBQ Sauce */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>BBQ Sauce</span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
+                    {otherRem.bbq_sauce ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>pcs</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  {brought.bbq_sauce || 0} brought − {posSold.bbq_sauce || 0} sold
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -580,6 +977,11 @@ export default function StaffDashboardPage({ isMobile }) {
   const [recentEntries, setRecentEntries] = useState([]);
   const [recentLoading, setRecentLoading] = useState(true);
   const [prevDayData, setPrevDayData] = useState(null); // for carry-forward
+  const [chickenCutYield, setChickenCutYield] = useState(9); // 9 or 8 pcs per whole chicken
+  const [posSummary, setPosSummary] = useState(null);
+  const [posLoading, setPosLoading] = useState(false);
+  const [stockReceivedSynced, setStockReceivedSynced] = useState(false);
+  const [stockSending, setStockSending] = useState(false);
 
   const isToday = selectedDate === todayStr();
   const isSubmitted = status === 'submitted';
@@ -669,7 +1071,7 @@ export default function StaffDashboardPage({ isMobile }) {
 
       if (attendanceModal === 'checkIn') {
         const shiftId = await staffShiftService.clockIn(profile.id, profile.outletId || 'outlet-1');
-        
+
         // Also update staff profile's checkIn
         await staffService.update(profile.id, { checkIn: timeStr });
 
@@ -744,10 +1146,20 @@ export default function StaffDashboardPage({ isMobile }) {
             setFormData(merged);
             setNotes(doc.notes || '');
             setStatus(doc.status || 'draft');
+            setStockReceivedSynced(!!(doc.stockReceivedSynced || doc.status === 'submitted'));
+            const w = Number(merged.raw_materials?.chicken_whole || 0);
+            const p = Number(merged.raw_materials?.chicken_pcs || 0);
+            if (w > 0 && p > 0 && Math.round(p / w) === 8) {
+              setChickenCutYield(8);
+            } else {
+              setChickenCutYield(9);
+            }
           } else {
             setFormData(buildEmptyDayData());
             setNotes('');
             setStatus('draft');
+            setStockReceivedSynced(false);
+            setChickenCutYield(9);
           }
         }
       } catch (err) {
@@ -756,11 +1168,43 @@ export default function StaffDashboardPage({ isMobile }) {
           setFormData(buildEmptyDayData());
           setNotes('');
           setStatus('draft');
+          setStockReceivedSynced(false);
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
+  }, [selectedDate]);
+
+  // ─── Load POS daily sales summary for selectedDate ─────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    setPosLoading(true);
+    salesOrderService.getDailySummary(selectedDate)
+      .then(summary => {
+        if (!cancelled) {
+          setPosSummary(summary);
+          setPosLoading(false);
+          // Keep carryover and other remaining updated with POS sales
+          setFormData(prev => {
+            const autoRem = computeAutoRemainders(
+              prev.brought_to_stall,
+              prev.remaining_fried,
+              summary?.soldBreakdown || {}
+            );
+            return {
+              ...prev,
+              remaining_unfried: autoRem.remaining_unfried,
+              other_remaining: autoRem.other_remaining,
+            };
+          });
+        }
+      })
+      .catch(err => {
+        console.warn('[Dashboard] load POS summary error:', err);
+        if (!cancelled) setPosLoading(false);
+      });
     return () => { cancelled = true; };
   }, [selectedDate]);
 
@@ -797,7 +1241,7 @@ export default function StaffDashboardPage({ isMobile }) {
       setFormData(prev => {
         const brought = prev.brought_to_stall || {};
         const isBroughtEmpty = (brought.chicken_pcs === 0 || brought.chicken_pcs == null) &&
-                               (brought.carcass_pcs === 0 || brought.carcass_pcs == null);
+          (brought.carcass_pcs === 0 || brought.carcass_pcs == null);
         if (isBroughtEmpty) {
           const autoBrought = calculateBroughtToStall(prev.raw_materials, prevDayData?.remaining_unfried, isSaturday);
           return {
@@ -833,10 +1277,10 @@ export default function StaffDashboardPage({ isMobile }) {
         const prevUnfriedChicken = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
         const prevUnfriedCarcass = Number(prevDayData?.remaining_unfried?.carcass_pcs || 0);
 
-        // 1 WHOLE chicken is portioned into 9 pieces of chicken:
+        // 1 WHOLE chicken is portioned into pieces (standard 9 pcs, optional 8 pcs):
         if (productKey === 'chicken_whole') {
           const wholeCount = Number(value) || 0;
-          const pieces = Math.round(wholeCount * 9);
+          const pieces = Math.round(wholeCount * (chickenCutYield || 9));
           nextCategory.chicken_pcs = pieces;
 
           // Auto-calculate brought_to_stall.chicken_pcs (yesterday unfried + today received):
@@ -872,9 +1316,18 @@ export default function StaffDashboardPage({ isMobile }) {
         }
       }
 
+      // Automatically keep remaining_unfried (raw carryover) and other_remaining in sync:
+      const autoRem = computeAutoRemainders(
+        nextFormData.brought_to_stall,
+        nextFormData.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
+      nextFormData.remaining_unfried = autoRem.remaining_unfried;
+      nextFormData.other_remaining = autoRem.other_remaining;
+
       return nextFormData;
     });
-  }, [prevDayData, isSaturday]);
+  }, [prevDayData, isSaturday, chickenCutYield, posSummary]);
 
   // ─── Toggle category accordion ──────────────────────────────────────────
   const toggleCategory = useCallback((catKey) => {
@@ -889,19 +1342,27 @@ export default function StaffDashboardPage({ isMobile }) {
         prevDayData?.remaining_unfried,
         isSaturday
       );
+      const newBrought = {
+        ...prev.brought_to_stall,
+        chicken_pcs: autoBrought.chicken_pcs,
+        carcass_pcs: autoBrought.carcass_pcs,
+        chicken_neck_set: autoBrought.chicken_neck_set,
+      };
+      const autoRem = computeAutoRemainders(
+        newBrought,
+        prev.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
       return {
         ...prev,
-        brought_to_stall: {
-          ...prev.brought_to_stall,
-          chicken_pcs: autoBrought.chicken_pcs,
-          carcass_pcs: autoBrought.carcass_pcs,
-          chicken_neck_set: autoBrought.chicken_neck_set,
-        }
+        brought_to_stall: newBrought,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
       };
     });
     setSaveMsg({ type: 'success', text: 'Brought to stall updated with Excel formulas!' });
     setTimeout(() => setSaveMsg(null), 3000);
-  }, [prevDayData, isSaturday]);
+  }, [prevDayData, isSaturday, posSummary]);
 
   // ─── Mark Saturday Closed ────────────────────────────────────────────────
   const handleMarkSaturdayClosed = useCallback(() => {
@@ -914,7 +1375,6 @@ export default function StaffDashboardPage({ isMobile }) {
         chicken_neck_set: 0,
         mushroom: 0,
         butter_rice: 0,
-        skin: 0,
         cheese_sauce: 0,
         korean_sauce: 0,
         green_sauce: 0,
@@ -931,37 +1391,219 @@ export default function StaffDashboardPage({ isMobile }) {
     handleRecalculateBrought();
   }, [handleRecalculateBrought]);
 
-  // ─── Save as draft or final submit ──────────────────────────────────────
-  const handleSave = useCallback(async (finalSubmit = false) => {
+  // ─── Change Chicken Cut Yield (9 pcs vs 8 pcs per whole chicken) ─────────
+  const handleCutYieldChange = useCallback((newYield) => {
+    setChickenCutYield(newYield);
+    setFormData(prev => {
+      const wholeCount = Number(prev?.raw_materials?.chicken_whole || 0);
+      if (wholeCount <= 0) return prev;
+      const pieces = Math.round(wholeCount * newYield);
+      const prevUnfriedChicken = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
+      const newBrought = {
+        ...prev.brought_to_stall,
+        chicken_pcs: isSaturday ? (prev.brought_to_stall?.chicken_pcs || 0) : (prevUnfriedChicken + pieces),
+      };
+      const autoRem = computeAutoRemainders(
+        newBrought,
+        prev.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
+      return {
+        ...prev,
+        raw_materials: {
+          ...prev.raw_materials,
+          chicken_pcs: pieces,
+        },
+        brought_to_stall: newBrought,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
+      };
+    });
+  }, [prevDayData, isSaturday, posSummary]);
+
+  // ─── Auto-fill Remainder from POS Orders ────────────────────────────────
+  const handleAutofillFromPos = useCallback(() => {
+    if (!posSummary) return;
+    const posSold = posSummary.soldBreakdown || {};
+    let autoRemResult = null;
+    setFormData(prev => {
+      const autoRem = computeAutoRemainders(
+        prev.brought_to_stall,
+        prev.remaining_fried,
+        posSold
+      );
+      autoRemResult = autoRem;
+      return {
+        ...prev,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
+      };
+    });
+    const chickenUnf = autoRemResult?.remaining_unfried?.chicken_pcs ?? 0;
+    const carcassUnf = autoRemResult?.remaining_unfried?.carcass_pcs ?? 0;
+    setSaveMsg({
+      type: 'success',
+      text: `✓ Auto-filled from POS: ${chickenUnf} pcs chicken carryover, ${carcassUnf} carcass carryover, sauces & rice remainders updated!`
+    });
+    setTimeout(() => setSaveMsg(null), 5000);
+  }, [posSummary]);
+
+  // ─── Re-apply a submitted day to inventory (reverses prior, applies again) ───
+  const handleReapplyInventory = useCallback(async () => {
+    if (!window.confirm(`Re-apply ${selectedDate} to inventory? Any stock changes previously made for this date will be reversed first, then applied again.`)) return;
     setSaving(true);
     setSaveMsg(null);
     try {
-      const staffName = profile?.name || profile?.username || 'Unknown';
+      const autoRem = computeAutoRemainders(
+        formData.brought_to_stall,
+        formData.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
+      const dataToSync = {
+        ...formData,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
+      };
+      const result = await dailyInventoryService.syncInventoryFromDailyData(selectedDate, dataToSync, { force: true });
+      const n = result?.updated?.length || 0;
+      const miss = result?.unmatched?.length ? ` (no inventory item for: ${result.unmatched.join(', ')})` : '';
+      setSaveMsg({ type: 'success', text: `Re-applied: ${n} inventory movement(s)${miss}` });
+    } catch (err) {
+      console.error('[Dashboard] re-apply failed:', err);
+      setSaveMsg({ type: 'error', text: `Re-apply failed: ${err.message}` });
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSaveMsg(null), 6000);
+    }
+  }, [selectedDate, formData, posSummary]);
+
+  // ─── Admin Save KG updates after submission ──────────────────────────────
+  const handleSaveAdminKg = useCallback(async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const staffName = profile?.name || profile?.username || 'Admin';
       await dailyInventoryService.save(
         selectedDate,
         formData,
         staffName,
+        'submitted',
+        notes,
+      );
+      setSaveMsg({ type: 'success', text: 'Chicken & Carcass KG updated successfully!' });
+      setTimeout(() => setSaveMsg(null), 5000);
+    } catch (err) {
+      console.error('[Dashboard] save KG error:', err);
+      setSaveMsg({ type: 'error', text: `Save failed: ${err.message}` });
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedDate, formData, notes, profile]);
+
+  // ─── Save as draft or final submit ──────────────────────────────────────
+  const handleSave = useCallback(async (finalSubmit = false) => {
+    if (isSubmitted) {
+      setSaveMsg({ type: 'error', text: 'This day report has already been submitted and cannot be resubmitted.' });
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const staffName = profile?.name || profile?.username || 'Unknown';
+      const autoRem = computeAutoRemainders(
+        formData.brought_to_stall,
+        formData.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
+      const dataToSave = {
+        ...formData,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
+      };
+      await dailyInventoryService.save(
+        selectedDate,
+        dataToSave,
+        staffName,
         finalSubmit ? 'submitted' : 'draft',
         notes,
       );
+      let syncResult = null;
+      let syncFailed = false;
       if (finalSubmit) {
         setStatus('submitted');
-        // Synchronize inventory stock with the daily dashboard usage:
+        setStockReceivedSynced(true);
+        // Synchronize inventory stock with the daily dashboard entry:
         try {
-          await dailyInventoryService.syncInventoryFromDailyData(selectedDate, formData);
+          syncResult = await dailyInventoryService.syncInventoryFromDailyData(selectedDate, dataToSave);
         } catch (syncErr) {
-          console.warn('[StaffDashboardPage] inventory sync warning:', syncErr);
+          syncFailed = true;
+          console.error('[StaffDashboardPage] inventory sync failed:', syncErr);
         }
       }
-      setSaveMsg({ type: 'success', text: finalSubmit ? 'Submitted & inventory updated!' : 'Draft saved!' });
-      setTimeout(() => setSaveMsg(null), 3000);
+      if (!finalSubmit) {
+        setSaveMsg({ type: 'success', text: 'Draft saved!' });
+      } else if (syncFailed) {
+        setSaveMsg({ type: 'error', text: 'Submitted, but inventory update failed. Check console / permissions.' });
+      } else if (syncResult?.skipped) {
+        setSaveMsg({ type: 'success', text: 'Submitted. Inventory was already updated for this date.' });
+      } else {
+        const n = syncResult?.updated?.length || 0;
+        const miss = syncResult?.unmatched?.length ? ` (no inventory item for: ${syncResult.unmatched.join(', ')})` : '';
+        setSaveMsg({ type: 'success', text: `Submitted & ${n} inventory movement(s) applied${miss}` });
+      }
+      setTimeout(() => setSaveMsg(null), 6000);
     } catch (err) {
       console.error('[Dashboard] save error:', err);
       setSaveMsg({ type: 'error', text: `Save failed: ${err.message}` });
     } finally {
       setSaving(false);
     }
-  }, [selectedDate, formData, notes, profile]);
+  }, [selectedDate, formData, notes, profile, isSubmitted, posSummary]);
+
+  // ─── Send Raw Materials & Brought Stock into Central Inventory ──────────
+  const handleSendStockToInventory = useCallback(async () => {
+    if (isSubmitted) {
+      setSaveMsg({ type: 'error', text: 'This day report has already been submitted and locked.' });
+      return;
+    }
+    setStockSending(true);
+    setSaveMsg(null);
+    try {
+      const staffName = profile?.name || profile?.username || 'Unknown';
+      const autoRem = computeAutoRemainders(
+        formData.brought_to_stall,
+        formData.remaining_fried,
+        posSummary?.soldBreakdown || {}
+      );
+      const dataToSave = {
+        ...formData,
+        remaining_unfried: autoRem.remaining_unfried,
+        other_remaining: autoRem.other_remaining,
+      };
+
+      // Save draft with current numbers first
+      await dailyInventoryService.save(
+        selectedDate,
+        dataToSave,
+        staffName,
+        'draft',
+        notes,
+      );
+
+      // Send received stock to products
+      const result = await dailyInventoryService.sendReceivedStockToInventory(selectedDate, dataToSave);
+      setStockReceivedSynced(true);
+      const n = result?.updated?.length || 0;
+      const miss = result?.unmatched?.length ? ` (no inventory item for: ${result.unmatched.join(', ')})` : '';
+      setSaveMsg({ type: 'success', text: `Stock sent to inventory! ${n} item(s) credited${miss}` });
+      setTimeout(() => setSaveMsg(null), 5000);
+    } catch (err) {
+      console.error('[Dashboard] send stock error:', err);
+      setSaveMsg({ type: 'error', text: `Failed to send stock: ${err.message}` });
+    } finally {
+      setStockSending(false);
+    }
+  }, [selectedDate, formData, notes, profile, isSubmitted, posSummary]);
 
   // ─── Summary computations ──────────────────────────────────────────────
   const summaryStats = useMemo(() => {
@@ -1386,12 +2028,20 @@ export default function StaffDashboardPage({ isMobile }) {
           color="#f59e0b" sub="Carries over" loading={loading}
         />
         <SummaryCard
-          label="Chicken Sold" value={chickenSoldToday.toFixed(1)} icon={CheckCircle2}
-          color="#16a34a" sub="Pcs today" loading={loading}
+          label="Chicken Sold"
+          value={posSummary && posSummary.orderCount > 0 ? (posSummary.soldBreakdown?.chicken_pcs || 0) : chickenSoldToday.toFixed(1)}
+          icon={CheckCircle2}
+          color="#16a34a"
+          sub={posSummary && posSummary.orderCount > 0 ? `${posSummary.orderCount} POS orders` : 'Pcs today'}
+          loading={loading || posLoading}
         />
         <SummaryCard
-          label="Carcass Sold" value={carcassSoldToday.toFixed(1)} icon={CheckCircle2}
-          color="#16a34a" sub="Pcs today" loading={loading}
+          label="Carcass Sold"
+          value={posSummary && posSummary.orderCount > 0 ? (posSummary.soldBreakdown?.carcass_pcs || 0) : carcassSoldToday.toFixed(1)}
+          icon={CheckCircle2}
+          color="#16a34a"
+          sub={posSummary && posSummary.orderCount > 0 ? `${posSummary.orderCount} POS orders` : 'Pcs today'}
+          loading={loading || posLoading}
         />
         <SummaryCard
           label="Waste Charge"
@@ -1419,6 +2069,59 @@ export default function StaffDashboardPage({ isMobile }) {
             </div>
           ) : (
             <>
+              {/* POS Live Connected Banner */}
+              {posSummary && posSummary.orderCount > 0 && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                  border: '1.5px solid #bfdbfe',
+                  borderRadius: 'var(--radius)',
+                  padding: '12px 16px',
+                  marginBottom: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  boxShadow: 'var(--shadow-sm)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10,
+                      background: '#2563eb', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                    }}>
+                      <TrendingUp size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>POS Orders Connected: {posSummary.orderCount} order{posSummary.orderCount > 1 ? 's' : ''}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, background: '#2563eb', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>
+                          RM {posSummary.totalRevenue.toFixed(2)}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#1e3a8a', marginTop: 2 }}>
+                        {posSummary.soldBreakdown?.chicken_pcs || 0} chicken pcs sold · {posSummary.soldBreakdown?.carcass_pcs || 0} carcass · {posSummary.soldBreakdown?.butter_rice || 0} rice sets · Deducted from live inventory
+                      </div>
+                    </div>
+                  </div>
+                  {!isSubmitted && (
+                    <button
+                      type="button"
+                      onClick={handleAutofillFromPos}
+                      className="btn btn-sm"
+                      style={{
+                        background: '#2563eb', color: '#fff', border: 'none', fontWeight: 700,
+                        fontSize: 11, padding: '6px 12px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 6,
+                        cursor: 'pointer'
+                      }}
+                      title="Sync closing remainder with POS sales"
+                    >
+                      <Sparkles size={13} /> Auto-fill Remainder from POS
+                    </button>
+                  )}
+                </div>
+              )}
+
               {CATEGORIES.map(cat => (
                 <CategorySection
                   key={cat.key}
@@ -1429,18 +2132,38 @@ export default function StaffDashboardPage({ isMobile }) {
                   isOpen={!!openCategories[cat.key]}
                   onToggle={() => toggleCategory(cat.key)}
                   isSubmitted={isSubmitted}
+                  isAdmin={isAdminUser}
                   isSaturday={isSaturday}
                   isSunday={isSunday}
                   prevTradingDate={prevTradingDate}
                   prevDayData={prevDayData}
                   rawMaterials={formData.raw_materials}
                   onRecalculateBrought={handleRecalculateBrought}
+                  onSendStockToInventory={handleSendStockToInventory}
+                  stockReceivedSynced={stockReceivedSynced}
+                  stockSending={stockSending}
                   friedPenalty={friedLeftoverPenalty}
+                  chickenCutYield={chickenCutYield}
+                  onCutYieldChange={handleCutYieldChange}
                 />
               ))}
 
+              {/* ──── Auto-filled POS Remainders & Carryover Section ──── */}
+              <AutoRemaindersSection
+                formData={formData}
+                posSummary={posSummary}
+                onAutofillFromPos={handleAutofillFromPos}
+                isSubmitted={isSubmitted}
+              />
+
               {/* ──── Live Sales & Fried Reconciliation (Excel ProductInventory) ──── */}
-              <DailyReconciliationPanel formData={formData} isMobile={isMobile} />
+              <DailyReconciliationPanel
+                formData={formData}
+                isMobile={isMobile}
+                posSummary={posSummary}
+                onAutofillFromPos={handleAutofillFromPos}
+                isSubmitted={isSubmitted}
+              />
 
               {/* Notes */}
               <div style={{
@@ -1488,43 +2211,90 @@ export default function StaffDashboardPage({ isMobile }) {
                   </div>
                 )}
 
-                {!isSubmitted && (
+                {!isSubmitted ? (
                   <>
                     <button
+                      type="button"
                       className="btn btn-outline"
                       onClick={() => handleSave(false)}
-                      disabled={saving}
+                      disabled={saving || stockSending}
                       style={{ gap: 6 }}
                     >
                       {saving ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={14} />}
                       Save Draft
                     </button>
                     <button
+                      type="button"
+                      className="btn"
+                      onClick={handleSendStockToInventory}
+                      disabled={saving || stockSending}
+                      style={{
+                        gap: 6, fontWeight: 700,
+                        background: stockReceivedSynced ? '#059669' : '#0284c7',
+                        borderColor: stockReceivedSynced ? '#059669' : '#0284c7',
+                        color: '#fff',
+                      }}
+                      title="Send today's received raw materials and brought stock to inventory for live POS deduction"
+                    >
+                      {stockSending ? (
+                        <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                      ) : stockReceivedSynced ? (
+                        <PackageCheck size={14} />
+                      ) : (
+                        <Truck size={14} />
+                      )}
+                      {stockReceivedSynced ? 'Update Sent Stock' : 'Send Stock to Inventory'}
+                    </button>
+                    <button
+                      type="button"
                       className="btn btn-primary"
                       onClick={() => {
-                        if (window.confirm('Submit this day\'s inventory? You won\'t be able to edit after submission.')) {
+                        if (window.confirm("Submit this day's inventory? Once submitted, this day cannot be edited or resubmitted.")) {
                           handleSave(true);
                         }
                       }}
-                      disabled={saving}
-                      style={{ gap: 6 }}
+                      disabled={saving || stockSending}
+                      style={{ gap: 6, background: '#16a34a', borderColor: '#16a34a' }}
                     >
                       {saving ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={14} />}
                       Submit
                     </button>
                   </>
+                ) : (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 13, fontWeight: 700, color: '#15803d',
+                    padding: '8px 16px', borderRadius: 8,
+                    background: '#dcfce7', border: '1px solid #86efac',
+                  }}>
+                    <Lock size={15} color="#16a34a" />
+                    <span>Submitted & Locked · Cannot be resubmitted</span>
+                  </div>
                 )}
 
-                {isSubmitted && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    fontSize: 12, fontWeight: 600, color: '#15803d',
-                    padding: '8px 14px', borderRadius: 8,
-                    background: 'var(--green-light)',
-                  }}>
-                    <CheckCircle2 size={14} />
-                    This entry has been submitted and locked.
-                  </div>
+                {isSubmitted && isAdminUser && (
+                  <>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleSaveAdminKg}
+                      disabled={saving}
+                      style={{ gap: 6 }}
+                      title="Save updated KG values for Chicken and Carcass"
+                    >
+                      {saving ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={14} />}
+                      Save KG Updates
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      onClick={handleReapplyInventory}
+                      disabled={saving}
+                      style={{ gap: 6 }}
+                      title="Reverse what was previously applied for this date and apply it again"
+                    >
+                      {saving ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RotateCcw size={14} />}
+                      Re-apply to Inventory
+                    </button>
+                  </>
                 )}
               </div>
             </>

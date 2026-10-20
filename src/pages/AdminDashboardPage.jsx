@@ -260,7 +260,7 @@ export default function AdminDashboardPage({ isMobile, navigate }) {
   // ─── Low-stock alerts ───────────────────────────────────────────────────
   const alerts = useMemo(() => {
     return inventoryProducts
-      .filter(p => p.isInventoryItem && p.isActive && !p.isArchived && p.stock != null && p.minStock != null && p.stock <= p.minStock)
+      .filter(p => p.isInventoryItem && p.isActive && !p.isArchived && !p.name?.toLowerCase().includes('chicken (whole)') && p.stock != null && p.minStock != null && p.stock <= p.minStock)
       .map(p => ({
         label: `Low ${p.name} Stock`,
         badge: p.stock <= 0 ? 'Critical' : p.stock <= p.minStock * 0.5 ? 'Urgent' : 'Low',

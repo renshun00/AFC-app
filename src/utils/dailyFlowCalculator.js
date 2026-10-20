@@ -21,7 +21,7 @@
  *     brought_to_stall:  { chicken_pcs: 126, carcass_pcs: 40, chicken_neck_set: 10, mushroom: 8, ... },
  *     remaining_fried:   { chicken_pcs: 4, carcass_pcs: 1, neck: 1, mushroom: 0 },
  *     remaining_unfried: { chicken_pcs: 10, carcass_pcs: 2, neck: 0, mushroom: 1 },
- *     other_remaining:   { butter_rice: 1, skin: 0, cheese_sauce: 2, ... },
+ *     other_remaining:   { butter_rice: 1, cheese_sauce: 2, ... },
  *   }
  */
 
@@ -39,7 +39,6 @@ export const FRIED_ITEMS = [
 // ── Non-fried items: tracked through brought_to_stall → other_remaining ──
 export const NON_FRIED_ITEMS = [
     { key: 'butter_rice', label: 'Butter Rice', unit: 'set' },
-    { key: 'skin', label: 'Skin', unit: 'pcs' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', unit: 'pcs' },
     { key: 'korean_sauce', label: 'Korean Sauce', unit: 'pcs' },
     { key: 'green_sauce', label: 'Green Sauce', unit: 'pcs' },
@@ -336,4 +335,57 @@ export function calculateFriedLeftoverPenalty(dayData) {
         totalCharge,
         perStaffDeduction,
     };
-}
+}
+
+/**
+ * Automatically compute remaining unfried (uncooked carryover) and other remaining (non-fried items)
+ * from Brought to Stall, POS Sold Breakdown, and Unsold Cooked Count (Remaining Fried):
+ *
+ * Fried Items:
+ *   Expected Total Remaining = max(0, Brought - POS Sold)
+ *   Remaining Uncooked (Carryover) = max(0, Expected Total Remaining - Remaining Fried)
+ *
+ * Non-Fried Items (Rice, Sauces):
+ *   Other Remaining = max(0, Brought - POS Sold)
+ */
+export function computeAutoRemainders(brought = {}, remFried = {}, posSold = {}) {
+    const chickenBrought = n(brought.chicken_pcs);
+    const chickenSold = n(posSold.chicken_pcs);
+    const chickenFried = n(remFried.chicken_pcs);
+    const chickenUnfried = Math.max(0, Math.max(0, chickenBrought - chickenSold) - chickenFried);
+
+    const carcassBrought = n(brought.carcass_pcs);
+    const carcassSold = n(posSold.carcass_pcs);
+    const carcassFried = n(remFried.carcass_pcs);
+    const carcassUnfried = Math.max(0, Math.max(0, carcassBrought - carcassSold) - carcassFried);
+
+    const mushroomBrought = n(brought.mushroom);
+    const mushroomSold = n(posSold.mushroom);
+    const mushroomFried = n(remFried.mushroom);
+    const mushroomUnfried = Math.max(0, Math.max(0, mushroomBrought - mushroomSold) - mushroomFried);
+
+    const neckBrought = n(brought.chicken_neck_set);
+    const neckSold = n(posSold.chicken_neck_set);
+    const neckFried = n(remFried.neck);
+    const neckUnfried = Math.max(0, Math.max(0, neckBrought - neckSold) - neckFried);
+
+    const otherRemaining = {
+        butter_rice: Math.max(0, n(brought.butter_rice) - n(posSold.butter_rice)),
+        cheese_sauce: Math.max(0, n(brought.cheese_sauce) - n(posSold.cheese_sauce)),
+        korean_sauce: Math.max(0, n(brought.korean_sauce) - n(posSold.korean_sauce)),
+        green_sauce: Math.max(0, n(brought.green_sauce) - n(posSold.green_sauce)),
+        bbq_sauce: Math.max(0, n(brought.bbq_sauce) - n(posSold.bbq_sauce)),
+        korean_bbq_sauce: Math.max(0, n(brought.korean_bbq_sauce) - n(posSold.korean_bbq_sauce)),
+    };
+
+    return {
+        remaining_unfried: {
+            chicken_pcs: chickenUnfried,
+            carcass_pcs: carcassUnfried,
+            mushroom: mushroomUnfried,
+            neck: neckUnfried,
+        },
+        other_remaining: otherRemaining,
+    };
+}
+

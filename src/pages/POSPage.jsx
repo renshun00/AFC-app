@@ -191,8 +191,11 @@ export default function POSPage({ isMobile }) {
       const randPart = Math.floor(1000 + Math.random() * 9000);
       const generatedInvoiceNumber = `INV-${datePart}-${randPart}`;
 
+      const dateStr = now.toISOString().slice(0, 10);
+
       const orderId = await salesOrderService.create({
         invoiceNumber: generatedInvoiceNumber,
+        date: dateStr,
         outletId: 'main_branch',
         staffId: 'pos_user',
         subtotal,
@@ -200,13 +203,17 @@ export default function POSPage({ isMobile }) {
         total: grandTotal,
         status: 'completed',
         paymentMethod: payMethod || 'cash',
-        items: cart.map(item => ({
-          menuItemId: item.id,
-          name: item.name,
-          qty: item.qty,
-          price: item.price,
-          recipe: item.recipe || [],
-        })),
+        items: cart.map(item => {
+          const liveProd = productDocs.find(p => p.id === item.id);
+          const recipe = (item.recipe && item.recipe.length > 0) ? item.recipe : (liveProd?.recipe || []);
+          return {
+            menuItemId: item.id,
+            name: item.name,
+            qty: item.qty,
+            price: item.price,
+            recipe,
+          };
+        }),
       });
 
       // 2. Record the payment transaction
@@ -218,10 +225,12 @@ export default function POSPage({ isMobile }) {
 
       // 3. Deduct stock — recipe-aware ingredient deduction
       for (const item of cart) {
-        if (item.recipe && item.recipe.length > 0) {
+        const liveProd = productDocs.find(p => p.id === item.id);
+        const itemRecipe = (item.recipe && item.recipe.length > 0) ? item.recipe : (liveProd?.recipe || []);
+        if (itemRecipe && itemRecipe.length > 0) {
           // Recipe exists: deduct each raw material ingredient
           await recipeService.deductIngredients(
-            item.recipe,
+            itemRecipe,
             item.qty,
             orderId,
             inventoryDocs,

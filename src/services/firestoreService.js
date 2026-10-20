@@ -101,11 +101,12 @@ export const salesOrderService = {
   create: (data) =>
     insert('sales_orders', {
       invoiceNumber: data.invoiceNumber ?? null,
-      outletId: data.outletId,
-      staffId: data.staffId,
-      subtotal: data.subtotal,
+      date: data.date || (new Date()).toISOString().slice(0, 10),
+      outletId: data.outletId ?? 'main_branch',
+      staffId: data.staffId ?? 'pos_user',
+      subtotal: data.subtotal ?? 0,
       discount: data.discount ?? 0,
-      total: data.total,
+      total: data.total ?? 0,
       status: data.status ?? 'completed',
       paymentMethod: data.paymentMethod ?? null,
       items: data.items ?? [],
@@ -151,6 +152,206 @@ export const salesOrderService = {
   },
 
   updateStatus: (id, status) => patch('sales_orders', id, { status }),
+
+  /**
+   * Aggregates completed POS sales orders for a specific date (YYYY-MM-DD).
+   * Extracts chicken pieces sold, carcass, sauces, rice, and COS directly from
+   * completed orders and their recipes.
+   */
+  getDailySummary: async (dateString) => {
+    if (!dateString) return null;
+    let orders = [];
+
+    // 1. Try querying by date field
+    try {
+      const qDate = query(
+        col('sales_orders'),
+        where('date', '==', dateString),
+        where('status', '==', 'completed')
+      );
+      const snap = await getDocs(qDate);
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      console.warn('[salesOrderService] date field query fallback:', e);
+    }
+
+    // 2. Fallback to createdAt range or memory filter if orders empty
+    if (orders.length === 0) {
+      try {
+        const start = new Date(dateString + 'T00:00:00');
+        const end = new Date(dateString + 'T23:59:59.999');
+        const qRange = query(
+          col('sales_orders'),
+          where('createdAt', '>=', Timestamp.fromDate(start)),
+          where('createdAt', '<=', Timestamp.fromDate(end)),
+          where('status', '==', 'completed')
+        );
+        const snapRange = await getDocs(qRange);
+        orders = snapRange.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (rangeErr) {
+        try {
+          const qRecent = query(
+            col('sales_orders'),
+            where('status', '==', 'completed'),
+            orderBy('createdAt', 'desc'),
+            limit(300)
+          );
+          const snapRecent = await getDocs(qRecent);
+          orders = snapRecent.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(o => {
+              if (o.date === dateString) return true;
+              if (o.createdAt) {
+                const dt = o.createdAt.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
+                return dt.toISOString().slice(0, 10) === dateString;
+              }
+              return false;
+            });
+        } catch (memErr) {
+          console.error('[salesOrderService] getDailySummary failed:', memErr);
+        }
+      }
+    }
+
+    let totalRevenue = 0;
+    let totalCostOfSales = 0;
+    let chickenPcsSold = 0;
+    let carcassPcsSold = 0;
+    let chickenNeckSetSold = 0;
+    let mushroomSetsSold = 0;
+    let butterRiceSold = 0;
+    const saucesSold = {
+      cheese_sauce: 0,
+      korean_sauce: 0,
+      green_sauce: 0,
+      bbq_sauce: 0,
+    };
+    const itemsSummary = {};
+
+    for (const order of orders) {
+      totalRevenue += Number(order.total) || 0;
+      const items = order.items || [];
+
+      for (const it of items) {
+        const qty = Number(it.qty) || 0;
+        const price = Number(it.price) || 0;
+        const nameLower = String(it.name || '').toLowerCase();
+        const recipe = it.recipe || [];
+
+        if (it.menuItemId) {
+          if (!itemsSummary[it.menuItemId]) {
+            itemsSummary[it.menuItemId] = { id: it.menuItemId, name: it.name, qty: 0, total: 0 };
+          }
+          itemsSummary[it.menuItemId].qty += qty;
+          itemsSummary[it.menuItemId].total += qty * price;
+        }
+
+        let itemChickenCounted = false;
+        let itemCarcassCounted = false;
+        let itemNeckCounted = false;
+        let itemMushroomCounted = false;
+        let itemRiceCounted = false;
+
+        const hasRecipe = recipe && recipe.length > 0;
+
+        if (hasRecipe) {
+          for (const ing of recipe) {
+            const ingName = String(ing.inventoryItemName || '').toLowerCase();
+            const ingQty = (Number(ing.qtyPerUnit) || 1) * qty;
+
+            if (ingName.includes('chicken (pieces)') || ingName.includes('chicken pieces') || (ingName.includes('ayam') && ingName.includes('ketul'))) {
+              chickenPcsSold += ingQty;
+              itemChickenCounted = true;
+            } else if (ingName.includes('carcass') || ingName.includes('rangka')) {
+              carcassPcsSold += ingQty;
+              itemCarcassCounted = true;
+            } else if (ingName.includes('neck') || ingName.includes('leher')) {
+              chickenNeckSetSold += ing.unit === 'set' ? ingQty : Math.floor(ingQty / 4) || ingQty;
+              itemNeckCounted = true;
+            } else if (ingName.includes('mushroom') || ingName.includes('cendawan') || ingName.includes('enoki')) {
+              mushroomSetsSold += ingQty;
+              itemMushroomCounted = true;
+            } else if (ingName.includes('rice') || ingName.includes('nasi') || ingName.includes('beras')) {
+              butterRiceSold += ingQty;
+              itemRiceCounted = true;
+            } else if (ingName.includes('cheese') || ingName.includes('keju')) {
+              saucesSold.cheese_sauce += ingQty;
+            } else if (ingName.includes('korean')) {
+              saucesSold.korean_sauce += ingQty;
+            } else if (ingName.includes('green') || ingName.includes('hijau')) {
+              saucesSold.green_sauce += ingQty;
+            } else if (ingName.includes('bbq')) {
+              saucesSold.bbq_sauce += ingQty;
+            }
+          }
+        } else {
+          // Fallback heuristics ONLY if recipe was absent
+          const isNonChickenPiece = nameLower.includes('carcass') || nameLower.includes('rangka') ||
+                                    nameLower.includes('neck') || nameLower.includes('leher') ||
+                                    nameLower.includes('mushroom') || nameLower.includes('cendawan') || nameLower.includes('enoki') ||
+                                    nameLower.includes('rice') || nameLower.includes('nasi') ||
+                                    nameLower.includes('sauce') || nameLower.includes('sos');
+
+          if (!isNonChickenPiece) {
+            if (nameLower.includes('1 pc') || nameLower.includes('1pc') || nameLower.includes('1 ketul') || nameLower.includes('single')) {
+              chickenPcsSold += 1 * qty;
+            } else if (nameLower.includes('2 pc') || nameLower.includes('2pc') || nameLower.includes('2 ketul') || nameLower.includes('double')) {
+              chickenPcsSold += 2 * qty;
+            } else if (nameLower.includes('3 pc') || nameLower.includes('3pc') || nameLower.includes('3 ketul') || nameLower.includes('trio')) {
+              chickenPcsSold += 3 * qty;
+            } else if (nameLower.includes('fried chicken') || nameLower.includes('ayam goreng') || nameLower.includes('original') || nameLower.includes('spicy')) {
+              chickenPcsSold += 1 * qty;
+            }
+          }
+
+          if (nameLower.includes('carcass') || nameLower.includes('rangka')) {
+            carcassPcsSold += 1 * qty;
+          }
+          if (nameLower.includes('neck') || nameLower.includes('leher')) {
+            chickenNeckSetSold += 1 * qty;
+          }
+          if (nameLower.includes('mushroom') || nameLower.includes('cendawan') || nameLower.includes('enoki')) {
+            mushroomSetsSold += 1 * qty;
+          }
+          if (nameLower.includes('rice') || nameLower.includes('nasi')) {
+            butterRiceSold += 1 * qty;
+          }
+          if (nameLower.includes('cheese sauce') || nameLower.includes('sos cheese') || nameLower.includes('sos keju')) {
+            saucesSold.cheese_sauce += 1 * qty;
+          }
+          if (nameLower.includes('korean sauce') || nameLower.includes('sos korean')) {
+            saucesSold.korean_sauce += 1 * qty;
+          }
+          if (nameLower.includes('green sauce') || nameLower.includes('sos hijau')) {
+            saucesSold.green_sauce += 1 * qty;
+          }
+          if (nameLower.includes('bbq sauce') || nameLower.includes('sos bbq')) {
+            saucesSold.bbq_sauce += 1 * qty;
+          }
+        }
+      }
+    }
+
+    return {
+      date: dateString,
+      orderCount: orders.length,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalCostOfSales: Math.round(totalCostOfSales * 100) / 100,
+      soldBreakdown: {
+        chicken_pcs: chickenPcsSold,
+        carcass_pcs: carcassPcsSold,
+        chicken_neck_set: chickenNeckSetSold,
+        mushroom: mushroomSetsSold,
+        butter_rice: butterRiceSold,
+        cheese_sauce: saucesSold.cheese_sauce,
+        korean_sauce: saucesSold.korean_sauce,
+        green_sauce: saucesSold.green_sauce,
+        bbq_sauce: saucesSold.bbq_sauce,
+      },
+      itemsSummary: Object.values(itemsSummary),
+      orders,
+    };
+  },
 };
 
 // ── inventory_transactions ────────────────────────────────────────────────────
@@ -1170,65 +1371,279 @@ export const dailyInventoryService = {
   delete: (date) => deleteDoc(ref('daily_inventory', date)),
 
   /**
-   * Directly synchronize inventory stock levels in `products` with the daily usage
-   * computed from Staff Dashboard input (Excel model).
+   * Send received raw materials and brought stock to inventory (Morning Stock-In):
+   * Credits Chicken (Whole), Chicken (Pieces), Carcass, Neck, Tube Ice, Oil, Sauces, Mushroom.
+   * Uses referenceId: `daily_received_${date}`.
+   * Reversible/Idempotent if called again with updated figures.
    */
-  syncInventoryFromDailyData: async (date, dayData) => {
+  sendReceivedStockToInventory: async (date, dayData, options = {}) => {
+    const refId = `daily_received_${date}`;
+
+    // If previously applied for this date, revert prior transactions so new values apply cleanly
+    const prior = await getDocs(query(col('inventory_transactions'), where('referenceId', '==', refId)));
+    if (!prior.empty) {
+      const priorNet = {};
+      for (const txDoc of prior.docs) {
+        const tx = txDoc.data();
+        if (tx.productId) {
+          priorNet[tx.productId] = (priorNet[tx.productId] || 0) + (Number(tx.qty) || 0);
+        }
+      }
+      for (const [productId, netQty] of Object.entries(priorNet)) {
+        const pRef = ref('products', productId);
+        const pSnap = await getDoc(pRef);
+        if (pSnap.exists()) {
+          const cur = Number(pSnap.data().stock) || 0;
+          const reverted = Math.max(0, Math.round((cur - netQty) * 1000) / 1000);
+          await updateDoc(pRef, { stock: reverted, updatedAt: serverTimestamp() });
+        }
+      }
+      for (const txDoc of prior.docs) {
+        await deleteDoc(txDoc.ref);
+      }
+    }
+
+    const raw = dayData?.raw_materials || {};
+    const brought = dayData?.brought_to_stall || {};
+    const num = (v) => Number(v) || 0;
+    const chickenReceivedPcs = num(raw.chicken_pcs) || num(raw.chicken_whole) * 9;
+
+    let movements = [
+      { label: 'Chicken (Whole)', aliases: ['chicken (whole)', 'chicken whole'], delta: num(raw.chicken_whole), type: 'DAILY_RECEIVED' },
+      { label: 'Chicken (Pieces)', aliases: ['chicken (pieces)', 'chicken pieces'], delta: chickenReceivedPcs, type: 'DAILY_RECEIVED' },
+      { label: 'Carcass', aliases: ['carcass'], delta: num(raw.carcass_pcs), type: 'DAILY_RECEIVED' },
+      { label: 'Chicken Neck', aliases: ['chicken neck'], delta: num(raw.neck), type: 'DAILY_RECEIVED' },
+      { label: 'Tube Ice', aliases: ['tube ice'], delta: num(raw.tube_ice), type: 'DAILY_RECEIVED' },
+      { label: 'Cooking Oil (Packet)', aliases: ['cooking oil (packet)', 'cooking oil'], delta: num(raw.oil_topup_packet), type: 'DAILY_RECEIVED' },
+      { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(brought.cheese_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(brought.korean_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(brought.green_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(brought.bbq_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(brought.mushroom), type: 'DAILY_RECEIVED' },
+    ];
+
+    movements = movements.filter(m => m.delta > 0);
+    if (movements.length === 0) return { updated: [], unmatched: [], skipped: false };
+
+    const snap = await getDocs(query(col('products'), where('isInventoryItem', '==', true), where('isActive', '==', true)));
+    const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const findProduct = (aliases) => {
+      const keys = aliases.map(norm);
+      return products.find(p => keys.includes(norm(p.name)));
+    };
+
+    const running = {};
+    const updated = [];
+    const unmatched = [];
+
+    for (const m of movements) {
+      const match = findProduct(m.aliases);
+      if (!match) {
+        if (!unmatched.includes(m.label)) unmatched.push(m.label);
+        continue;
+      }
+      const current = running[match.id] ?? (Number(match.stock) || 0);
+      const next = Math.max(0, Math.round((current + m.delta) * 1000) / 1000);
+      running[match.id] = next;
+
+      await updateDoc(ref('products', match.id), { stock: next, updatedAt: serverTimestamp() });
+      await addDoc(col('inventory_transactions'), {
+        productId: match.id,
+        productName: match.name,
+        type: m.type,
+        qty: m.delta,
+        referenceId: refId,
+        createdAt: serverTimestamp(),
+      });
+      updated.push(`${match.name} +${m.delta}`);
+    }
+
+    try {
+      await updateDoc(ref('daily_inventory', date), {
+        stockReceivedSynced: true,
+        stockReceivedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { }
+
+    return { updated, unmatched, success: true };
+  },
+
+  /**
+   * Synchronize inventory stock in `products` with the Staff Dashboard entry:
+   *   + RECEIVED raw materials (Raw Materials section) are added to stock (if not already sent earlier)
+   *   − WASTE_FRIED_LEFTOVER: Unsold fried items discarded
+   *   − DAILY_VARIANCE: Physical shortages below expected remainder (if any)
+   * Guarded so the same date is never applied twice.
+   * Returns { updated: [...], unmatched: [...], skipped: boolean }.
+   */
+  syncInventoryFromDailyData: async (date, dayData, options = {}) => {
+    const refId = `daily_${date}`;
+    const receivedRefId = `daily_received_${date}`;
+
+    // Check if received stock was already applied earlier via sendReceivedStockToInventory
+    const receivedPrior = await getDocs(query(col('inventory_transactions'), where('referenceId', '==', receivedRefId)));
+    const alreadyReceived = !receivedPrior.empty;
+
+    // Idempotency: don't apply the same closing submit twice (unless force re-apply)
+    const prior = await getDocs(query(col('inventory_transactions'), where('referenceId', '==', refId)));
+    if (!prior.empty) {
+      if (!options.force) return { updated: [], unmatched: [], skipped: true };
+
+      // Calculate net previously applied qty per product to avoid intermediate clamping artifacts
+      const priorNet = {};
+      for (const txDoc of prior.docs) {
+        const tx = txDoc.data();
+        if (tx.productId) {
+          priorNet[tx.productId] = (priorNet[tx.productId] || 0) + (Number(tx.qty) || 0);
+        }
+      }
+      for (const [productId, netQty] of Object.entries(priorNet)) {
+        const pRef = ref('products', productId);
+        const pSnap = await getDoc(pRef);
+        if (pSnap.exists()) {
+          const cur = Number(pSnap.data().stock) || 0;
+          const reverted = Math.max(0, Math.round((cur - netQty) * 1000) / 1000);
+          await updateDoc(pRef, { stock: reverted, updatedAt: serverTimestamp() });
+        }
+      }
+      for (const txDoc of prior.docs) {
+        await deleteDoc(txDoc.ref);
+      }
+    }
+
     const friedAndSold = getFriedAndSoldQuantities(dayData);
     const rawUsage = getRawMaterialUsage(friedAndSold);
     const { fried, sold } = friedAndSold;
+    const raw = dayData?.raw_materials || {};
+    const brought = dayData?.brought_to_stall || {};
+    const remFried = dayData?.remaining_fried || {};
+    const remUnfried = dayData?.remaining_unfried || {};
+    const otherRem = dayData?.other_remaining || {};
+    const num = (v) => Number(v) || 0;
 
-    const usagesToDeduct = [
-      { name: 'Chicken (Pieces)', qty: fried?.chicken_pcs || 0 },
-      { name: 'Carcass', qty: fried?.carcass_pcs || 0 },
-      { name: 'Chicken Neck', qty: (fried?.neck || 0) * 4 }, // 4 pcs per set
-      { name: 'Mushroom (Enoki)', qty: fried?.mushroom || 0 },
-      // 1 single inventory item for FLOUR: 30g/chicken pc, 125g/carcass pc, 100g/mushroom set, 75g/neck set
-      { name: 'Flour (Tepung)', qty: Math.round((rawUsage?.flourKg || 0) * 1000) / 1000 },
-      { name: 'Cooking Oil (Packet)', qty: Number(dayData?.raw_materials?.oil_topup_packet || 0) },
-      { name: 'Tube Ice', qty: Number(dayData?.raw_materials?.tube_ice || 0) },
-      { name: 'Cheese Sauce (Sos Cheese)', qty: sold?.cheese_sauce || 0 },
-      { name: 'Korean Sauce (Sos Korean)', qty: sold?.korean_sauce || 0 },
-      { name: 'Green Sauce (Sos Hijau)', qty: sold?.green_sauce || 0 },
-      { name: 'BBQ Sauce (Sos BBQ)', qty: sold?.bbq_sauce || 0 },
-      { name: 'Chili Sauce Sachet (9g)', qty: rawUsage?.saucePackets || 0 },
-      { name: 'Paper Wrap (Bungkus Kertas)', qty: rawUsage?.paperWraps || 0 },
-      { name: 'Plastic Bag (Beg Plastik)', qty: rawUsage?.plasticBags || 0 },
-      { name: 'Sauce Container (Bekas Sos)', qty: rawUsage?.sauceContainers || 0 },
-      { name: 'Gloves (Sarung Tangan)', qty: rawUsage?.glovesUnits || 0 },
-      { name: 'LPG Gas (Tong Gas)', qty: rawUsage?.gasKg || 0 },
-      { name: 'Rice / Beras (5kg)', qty: rawUsage?.riceKg || 0 },
-      { name: 'Butter', qty: rawUsage?.butterKg || 0 },
-      { name: 'Evaporated Milk (Susu Cair)', qty: rawUsage?.milkKg || 0 },
-      { name: 'Rice Plastic Box (Bekas Nasi)', qty: rawUsage?.riceContainers || 0 },
-      { name: 'Soup Plastic Box (Bekas Sup)', qty: rawUsage?.soupContainers || 0 },
-    ].filter(item => item.qty > 0);
+    // Check if POS orders exist for this day
+    let posSummary = null;
+    try {
+      posSummary = await salesOrderService.getDailySummary(date);
+    } catch (e) {
+      console.warn('[syncInventory] POS summary check:', e);
+    }
+    const hasPosOrders = (posSummary?.orderCount || 0) > 0;
 
-    if (usagesToDeduct.length === 0) return;
+    // Prioritize actual raw pieces entered by staff; fallback to whole * 9
+    const chickenReceivedPcs = num(raw.chicken_pcs) || num(raw.chicken_whole) * 9;
 
-    // Load active inventory items from products
-    const q = query(col('products'), where('isInventoryItem', '==', true), where('isActive', '==', true));
-    const snap = await getDocs(q);
-    const existingProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    let movements = [];
 
-    for (const item of usagesToDeduct) {
-      const match = existingProducts.find(p => p.name === item.name);
-      if (match) {
-        const currentStock = Number(match.stock) || 0;
-        const newStock = Math.max(0, Math.round((currentStock - item.qty) * 100) / 100);
-        await updateDoc(ref('products', match.id), {
-          stock: newStock,
-          updatedAt: serverTimestamp(),
-        });
-        await addDoc(col('inventory_transactions'), {
-          productId: match.id,
-          productName: match.name,
-          type: 'DAILY_USAGE',
-          qty: -item.qty,
-          referenceId: `daily_${date}`,
-          createdAt: serverTimestamp(),
-        });
+    // ── 1. Deliveries received (Stock-In) - Only if NOT already sent in morning:
+    if (!alreadyReceived) {
+      movements.push(
+        { label: 'Chicken (Whole)', aliases: ['chicken (whole)', 'chicken whole'], delta: num(raw.chicken_whole), type: 'DAILY_RECEIVED' },
+        { label: 'Chicken (Pieces)', aliases: ['chicken (pieces)', 'chicken pieces'], delta: chickenReceivedPcs, type: 'DAILY_RECEIVED' },
+        { label: 'Carcass', aliases: ['carcass'], delta: num(raw.carcass_pcs), type: 'DAILY_RECEIVED' },
+        { label: 'Chicken Neck', aliases: ['chicken neck'], delta: num(raw.neck), type: 'DAILY_RECEIVED' },
+        { label: 'Tube Ice', aliases: ['tube ice'], delta: num(raw.tube_ice), type: 'DAILY_RECEIVED' },
+        { label: 'Cooking Oil (Packet)', aliases: ['cooking oil (packet)', 'cooking oil'], delta: num(raw.oil_topup_packet), type: 'DAILY_RECEIVED' },
+        { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(brought.cheese_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(brought.korean_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(brought.green_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(brought.bbq_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(brought.mushroom), type: 'DAILY_RECEIVED' },
+      );
+    }
+
+    // ── 2. Leftover Fried Chicken Discarded (Unsold & cannot carry over) ──
+    movements.push(
+      { label: 'Chicken (Pieces)', aliases: ['chicken (pieces)', 'chicken pieces'], delta: -num(remFried.chicken_pcs), type: 'WASTE_FRIED_LEFTOVER' },
+      { label: 'Carcass', aliases: ['carcass'], delta: -num(remFried.carcass_pcs), type: 'WASTE_FRIED_LEFTOVER' },
+      { label: 'Chicken Neck', aliases: ['chicken neck'], delta: -(num(remFried.neck || remFried.chicken_neck_set) * 4), type: 'WASTE_FRIED_LEFTOVER' },
+      { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: -num(remFried.mushroom), type: 'WASTE_FRIED_LEFTOVER' },
+    );
+
+    // ── 3. Unexplained physical shortages / shrinkage ──
+    let chickenShortage = 0;
+    let carcassShortage = 0;
+    if (hasPosOrders) {
+      const chickenSoldPos = num(posSummary.soldBreakdown?.chicken_pcs);
+      const chickenExpRem = Math.max(0, num(brought.chicken_pcs) - chickenSoldPos - num(remFried.chicken_pcs));
+      const chickenActualRem = num(remUnfried.chicken_pcs);
+      if (chickenActualRem < chickenExpRem) {
+        chickenShortage = chickenActualRem - chickenExpRem;
+      }
+
+      const carcassSoldPos = num(posSummary.soldBreakdown?.carcass_pcs);
+      const carcassExpRem = Math.max(0, num(brought.carcass_pcs) - carcassSoldPos - num(remFried.carcass_pcs));
+      const carcassActualRem = num(remUnfried.carcass_pcs);
+      if (carcassActualRem < carcassExpRem) {
+        carcassShortage = carcassActualRem - carcassExpRem;
       }
     }
+
+    if (chickenShortage < 0) {
+      movements.push({ label: 'Chicken (Pieces)', aliases: ['chicken (pieces)', 'chicken pieces'], delta: chickenShortage, type: 'DAILY_VARIANCE' });
+    }
+    if (carcassShortage < 0) {
+      movements.push({ label: 'Carcass', aliases: ['carcass'], delta: carcassShortage, type: 'DAILY_VARIANCE' });
+    }
+
+    // Check variances for sauces if POS was active
+    if (hasPosOrders) {
+      const sauceDefs = [
+        { key: 'cheese_sauce', label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)'] },
+        { key: 'korean_sauce', label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)'] },
+        { key: 'green_sauce', label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)'] },
+        { key: 'bbq_sauce', label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)'] },
+      ];
+      for (const s of sauceDefs) {
+        const soldPos = num(posSummary.soldBreakdown?.[s.key]);
+        const expRem = Math.max(0, num(brought[s.key]) - soldPos);
+        const actualRem = num(otherRem[s.key]);
+        if (actualRem < expRem) {
+          movements.push({ label: s.label, aliases: s.aliases, delta: actualRem - expRem, type: 'DAILY_VARIANCE' });
+        }
+      }
+    }
+
+    movements = movements.filter(m => m.delta !== 0);
+
+    if (movements.length === 0) return { updated: [], unmatched: [], skipped: false };
+
+    const snap = await getDocs(query(col('products'), where('isInventoryItem', '==', true), where('isActive', '==', true)));
+    const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const findProduct = (aliases) => {
+      const keys = aliases.map(norm);
+      return products.find(p => keys.includes(norm(p.name)));
+    };
+
+    const running = {}; // productId -> running stock across multiple movements
+    const updated = [];
+    const unmatched = [];
+
+    for (const m of movements) {
+      const match = findProduct(m.aliases);
+      if (!match) {
+        if (!unmatched.includes(m.label)) unmatched.push(m.label);
+        continue;
+      }
+      const current = running[match.id] ?? (Number(match.stock) || 0);
+      const next = Math.max(0, Math.round((current + m.delta) * 1000) / 1000);
+      running[match.id] = next;
+
+      await updateDoc(ref('products', match.id), { stock: next, updatedAt: serverTimestamp() });
+      await addDoc(col('inventory_transactions'), {
+        productId: match.id,
+        productName: match.name,
+        type: m.type,
+        qty: m.delta,
+        referenceId: refId,
+        createdAt: serverTimestamp(),
+      });
+      updated.push(`${match.name} ${m.delta > 0 ? '+' : ''}${m.delta}`);
+    }
+
+    return { updated, unmatched, skipped: false };
   },
 };

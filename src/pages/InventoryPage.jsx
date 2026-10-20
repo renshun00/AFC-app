@@ -160,10 +160,14 @@ export default function InventoryPage({ isMobile, userRole }) {
   }, [activeTab, activeItems, archivedItems, search]);
 
   // Low stock banner ONLY alerts for active, unarchived inventory items!
-  const lowStock = useMemo(() => activeItems.filter(i => i.stock <= i.minStock), [activeItems]);
+  const lowStock = useMemo(() => activeItems.filter(i => {
+    if (i.name.toLowerCase().includes('chicken (whole)')) return false;
+    return i.stock <= i.minStock;
+  }), [activeItems]);
 
   const stockStatus = (item) => {
     if (item.isArchived) return { label: 'Archived', cls: 'badge-gray' };
+    if (item.name.toLowerCase().includes('chicken (whole)')) return { label: 'Tracked in Pcs', cls: 'badge-blue' };
     const ratio = item.stock / item.minStock;
     if (ratio <= 1) return { label: 'Low', cls: 'badge-red' };
     if (ratio <= 1.5) return { label: 'Medium', cls: 'badge-amber' };
@@ -553,6 +557,9 @@ export default function InventoryPage({ isMobile, userRole }) {
                         </div>
                         <div>
                           <div>{item.name}</div>
+                          {item.name.toLowerCase().includes('chicken (whole)') && (
+                            <div style={{ fontSize: 10, color: '#2563eb', fontWeight: 600 }}>Purchasing Unit · Tracked in Pieces</div>
+                          )}
                           {item.isArchived && <span style={{ fontSize: 10, color: 'var(--text-3)' }}>(Archived - Muted)</span>}
                         </div>
                       </div>
@@ -1031,7 +1038,9 @@ export default function InventoryPage({ isMobile, userRole }) {
                 <div style={{ fontSize: 18, fontWeight: 700, color: st.label === 'Low' ? '#dc2626' : 'var(--text-1)' }}>
                   {selectedItem.stock} {selectedItem.unit}
                 </div>
-                <span className={`badge ${st.cls}`} style={{ marginTop: 4 }}>{st.label} Stock</span>
+                <span className={`badge ${st.cls}`} style={{ marginTop: 4 }}>
+                  {st.label === 'Tracked in Pcs' ? st.label : `${st.label} Stock`}
+                </span>
               </div>
               <div style={{ background: 'var(--main-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>Inventory Value</div>

@@ -1,4 +1,3 @@
-// ── Category definitions ────────────────────────────────────────────────────
 export const CATEGORIES = [
   {
     key: 'raw_materials',
@@ -6,7 +5,7 @@ export const CATEGORIES = [
     labelMy: 'Barang Mentah',
     color: '#3b82f6',     // blue
     icon: 'Package',
-    description: 'Raw stock received / available at start of day',
+    description: 'Raw stock received at start of day (Whole Chicken, Carcass, Ice, Oil)',
   },
   {
     key: 'brought_to_stall',
@@ -14,31 +13,15 @@ export const CATEGORIES = [
     labelMy: 'Bawa ke Gerai',
     color: '#8b5cf6',     // purple
     icon: 'Truck',
-    description: 'Items moved from storage to the stall for the day',
+    description: 'Stall opening stock (Yesterday Uncooked Carryover + Received)',
   },
   {
     key: 'remaining_fried',
-    label: 'Remaining Fried',
-    labelMy: 'Baki Dah Goreng',
+    label: 'Remaining Fried (Unsold)',
+    labelMy: 'Baki Dah Goreng (Unsold)',
     color: '#ef4444',     // red
     icon: 'Flame',
-    description: 'Unsold fried items at end of day (affects payroll)',
-  },
-  {
-    key: 'remaining_unfried',
-    label: 'Remaining Unfried',
-    labelMy: 'Baki Belum Goreng',
-    color: '#f59e0b',     // amber
-    icon: 'PackageOpen',
-    description: 'Uncooked items left — carries forward to next day',
-  },
-  {
-    key: 'other_remaining',
-    label: 'Other Remaining',
-    labelMy: 'Baki Lain-lain',
-    color: '#10b981',     // green
-    icon: 'MoreHorizontal',
-    description: 'Leftover sauces, sides and miscellaneous items',
+    description: 'Count unsold fried items in warmer at closing (Waste / Payroll penalty if >= 5 pcs)',
   },
 ];
 
@@ -57,9 +40,7 @@ export const CATEGORY_PRODUCTS = {
     { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'neck', label: 'Neck', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'tube_ice', label: 'Tube Ice', uom: 'BAG', uomLabel: 'bag' },
-    { key: 'crushed_ice', label: 'Crushed Ice', uom: 'BAG', uomLabel: 'bag' },
     { key: 'oil_topup_packet', label: 'Oil Top-Up (Packet)', uom: 'KG', uomLabel: 'kg' },
-    { key: 'oil_topup_bottle', label: 'Oil Top-Up (Bottle)', uom: 'KG', uomLabel: 'kg' },
   ],
 
   brought_to_stall: [
@@ -68,7 +49,6 @@ export const CATEGORY_PRODUCTS = {
     { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set', isCalculated: true, formulaDesc: "Raw Neck (pcs) ÷ 4" },
     { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'skin', label: 'Skin (Kulit)', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
@@ -91,7 +71,6 @@ export const CATEGORY_PRODUCTS = {
 
   other_remaining: [
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
-    { key: 'skin', label: 'Skin (Kulit)', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
@@ -105,10 +84,10 @@ export const CATEGORY_PRODUCTS = {
  */
 export function buildEmptyDayData() {
   const data = {};
-  for (const cat of CATEGORIES) {
-    data[cat.key] = {};
-    for (const prod of CATEGORY_PRODUCTS[cat.key]) {
-      data[cat.key][prod.key] = 0;
+  for (const catKey of Object.keys(CATEGORY_PRODUCTS)) {
+    data[catKey] = {};
+    for (const prod of CATEGORY_PRODUCTS[catKey]) {
+      data[catKey][prod.key] = 0;
     }
   }
   return data;
