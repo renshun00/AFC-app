@@ -245,3 +245,95 @@ export function getDailyCostOfSales(dayData, rawMaterialUnitCosts = {}, meatPric
         total,
     };
 }
+
+// ── Step 4 (= Excel BakiDahGorengHarian & RecordFromStaff automated flow) ───
+
+/**
+ * Helper to shift a YYYY-MM-DD date string by a given number of days.
+ */
+export function shiftDate(dateStr, days) {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Determine previous trading date based on Excel business rules:
+ * - Saturday is a closed day.
+ * - Sunday carries over from Friday (2 days prior, skipping Saturday).
+ * - Monday carries over from Sunday (1 day prior).
+ * - Tuesday - Friday carries over from previous day (1 day prior).
+ */
+export function getPreviousTradingDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = d.getDay(); // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek === 0) {
+        // Sunday carries over from Friday (2 days ago)
+        return shiftDate(dateStr, -2);
+    }
+    return shiftDate(dateStr, -1);
+}
+
+/**
+ * Calculate automated "Brought to Stall" (BAWA KE GERAI) quantities:
+ * - Ayam (ketul): yesterday's (or Friday's if Sunday) unfried + today's received pieces
+ * - Rangka (ketul): yesterday's unfried + today's received pieces
+ * - Leher (set): ROUNDDOWN(neck pcs received / 4)
+ * - Saturday is closed: returns 0 pieces
+ */
+export function calculateBroughtToStall(rawMaterials = {}, prevTradingDayUnfried = {}, isSaturday = false) {
+    if (isSaturday) {
+        return {
+            chicken_pcs: 0,
+            carcass_pcs: 0,
+            chicken_neck_set: 0,
+        };
+    }
+
+    const rawChicken = n(rawMaterials.chicken_pcs) || (n(rawMaterials.chicken_whole) * 9);
+    const prevUnfriedChicken = n(prevTradingDayUnfried.chicken_pcs);
+
+    const rawCarcass = n(rawMaterials.carcass_pcs);
+    const prevUnfriedCarcass = n(prevTradingDayUnfried.carcass_pcs);
+
+    const rawNeck = n(rawMaterials.neck);
+
+    return {
+        chicken_pcs: prevUnfriedChicken + rawChicken,
+        carcass_pcs: prevUnfriedCarcass + rawCarcass,
+        chicken_neck_set: Math.floor(rawNeck / 4),
+    };
+}
+
+/**
+ * Calculate Baki Dah Goreng (Fried Chicken Leftover) staff penalty
+ * matching the new `BakiDahGorengHarian` sheet:
+ *
+ * - Tracks leftover fried chicken (Ayam + Rangka) per day.
+ * - If total leftover fried pieces >= 5:
+ *     Total penalty = total leftover pieces * RM 5.00
+ *     Staff penalty deduction = Total penalty / 2 (Bahagi 2) = RM 2.50 / pc / staff.
+ * - If total leftover fried pieces < 5:
+ *     No penalty (RM 0.00). Days under 5 are exempt from charge.
+ */
+export function calculateFriedLeftoverPenalty(dayData) {
+    const remFried = dayData?.remaining_fried || {};
+    const ayamFriedLeft = n(remFried.chicken_pcs);
+    const rangkaFriedLeft = n(remFried.carcass_pcs);
+    const totalFriedLeft = ayamFriedLeft + rangkaFriedLeft;
+
+    const qualifiesForPenalty = totalFriedLeft >= 5;
+    const ratePerPiece = 5.00;
+    const totalCharge = qualifiesForPenalty ? totalFriedLeft * ratePerPiece : 0;
+    const perStaffDeduction = totalCharge / 2;
+
+    return {
+        ayamFriedLeft,
+        rangkaFriedLeft,
+        totalFriedLeft,
+        qualifiesForPenalty,
+        ratePerPiece,
+        totalCharge,
+        perStaffDeduction,
+    };
+}

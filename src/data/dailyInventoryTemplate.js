@@ -57,18 +57,22 @@ export const CATEGORY_PRODUCTS = {
     { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'neck', label: 'Neck', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'tube_ice', label: 'Tube Ice', uom: 'BAG', uomLabel: 'bag' },
+    { key: 'crushed_ice', label: 'Crushed Ice', uom: 'BAG', uomLabel: 'bag' },
     { key: 'oil_topup_packet', label: 'Oil Top-Up (Packet)', uom: 'KG', uomLabel: 'kg' },
+    { key: 'oil_topup_bottle', label: 'Oil Top-Up (Bottle)', uom: 'KG', uomLabel: 'kg' },
   ],
 
   brought_to_stall: [
-    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs' },
-    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs' },
-    { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set' },
+    { key: 'chicken_pcs', label: 'Chicken', uom: 'PCS', uomLabel: 'pcs', isCalculated: true, formulaDesc: "Yesterday's Unfried + Received" },
+    { key: 'carcass_pcs', label: 'Carcass', uom: 'PCS', uomLabel: 'pcs', isCalculated: true, formulaDesc: "Yesterday's Unfried + Received" },
+    { key: 'chicken_neck_set', label: 'Chicken Neck (4 pcs)', uom: 'SET', uomLabel: 'set', isCalculated: true, formulaDesc: "Raw Neck (pcs) ÷ 4" },
     { key: 'mushroom', label: 'Mushroom', uom: 'SET', uomLabel: 'set' },
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
+    { key: 'skin', label: 'Skin (Kulit)', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PCS', uomLabel: 'pcs' },
   ],
 
   remaining_fried: [
@@ -87,9 +91,11 @@ export const CATEGORY_PRODUCTS = {
 
   other_remaining: [
     { key: 'butter_rice', label: 'Butter Rice', uom: 'SET', uomLabel: 'set' },
+    { key: 'skin', label: 'Skin (Kulit)', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'cheese_sauce', label: 'Cheese Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'korean_sauce', label: 'Korean Sauce', uom: 'PCS', uomLabel: 'pcs' },
     { key: 'green_sauce', label: 'Green Sauce', uom: 'PCS', uomLabel: 'pcs' },
+    { key: 'bbq_sauce', label: 'BBQ Sauce', uom: 'PCS', uomLabel: 'pcs' },
   ]
 };
 

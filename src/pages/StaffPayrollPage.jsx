@@ -14,6 +14,7 @@ export const AFC_TASK_RATES = {
   'Overtime (OT)': { rate: 3.00, unit: 'hours (>8 hrs)' },
   'Meal Advance': { rate: 10.00, unit: 'claim (+RM10/day)' },
   'Cash Advance': { rate: -1.00, unit: 'RM advance (deduction)' },
+  'Fried Leftover Penalty': { rate: -2.50, unit: 'pcs (50% share of RM5/pc if ≥5)' },
   'Management Fee': { rate: 100.00, unit: 'day' }
 };
 
@@ -30,6 +31,8 @@ export function normalizeTaskName(taskName) {
     'Pinjam Makan': 'Meal Advance',
     'Pinjam Duit': 'Cash Advance',
     'Pinjam': 'Cash Advance',
+    'Baki Dah Goreng': 'Fried Leftover Penalty',
+    'Fried Leftover Penalty': 'Fried Leftover Penalty',
     'Pengurusan': 'Management Fee',
     'Overtime (OT)': 'Overtime (OT)',
     'OT': 'Overtime (OT)'
@@ -71,7 +74,14 @@ export function calcStaffWage(member) {
     } else if (taskName === 'Cash Advance') {
       deductions += Math.abs(qtyNum);
       return;
+    } else if (taskName === 'Fried Leftover Penalty') {
+      deductions += Math.abs(qtyNum * 2.50);
+      return;
     } else if (info) {
+      if (info.rate < 0) {
+        deductions += Math.abs(info.rate * qtyNum);
+        return;
+      }
       lineSubtotal = (info.rate || 0) * qtyNum;
     }
 

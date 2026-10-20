@@ -5,6 +5,8 @@ import {
   Loader, CheckCircle2, AlertCircle, Clock, ArrowRight,
   ArrowLeft, ClipboardList, FileDown, History,
   LogIn, LogOut, KeyRound, Eye, EyeOff, Lock, Check,
+  Calculator, RotateCcw, AlertTriangle, Sparkles, Info,
+  TrendingUp, CheckCircle,
 } from 'lucide-react';
 import { dailyInventoryService, staffShiftService, staffService } from '../services/firestoreService';
 import {
@@ -13,7 +15,15 @@ import {
   buildEmptyDayData,
 } from '../data/dailyInventoryTemplate';
 import { useAuth } from '../context/AuthContext';
-import { getFriedAndSoldQuantities } from '../utils/dailyFlowCalculator';
+import {
+  getFriedAndSoldQuantities,
+  calculateBroughtToStall,
+  calculateFriedLeftoverPenalty,
+  getPreviousTradingDate,
+  shiftDate,
+  FRIED_ITEMS,
+  NON_FRIED_ITEMS,
+} from '../utils/dailyFlowCalculator';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 
@@ -25,16 +35,11 @@ function todayStr() {
 }
 
 function formatDateDisplay(dateStr) {
+  if (!dateStr) return '';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-MY', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
-}
-
-function shiftDate(dateStr, days) {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 const CATEGORY_ICONS = {
@@ -47,15 +52,16 @@ const CATEGORY_ICONS = {
 
 // ── Stat card for the top summary ────────────────────────────────────────────
 
-function SummaryCard({ label, value, icon: Icon, color, sub, loading }) {
+function SummaryCard({ label, value, icon: Icon, color, sub, loading, highlight }) {
   return (
     <div style={{
-      background: '#fff', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
+      background: '#fff', borderRadius: 'var(--radius)', border: `1px solid ${highlight ? color : 'var(--border)'}`,
       padding: '16px 18px', flex: 1, minWidth: 140,
-      boxShadow: 'var(--shadow-sm)', transition: 'transform 0.15s, box-shadow 0.15s',
+      boxShadow: highlight ? `0 0 0 2px ${color}20` : 'var(--shadow-sm)',
+      transition: 'transform 0.15s, box-shadow 0.15s',
     }}
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--shadow)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = highlight ? `0 0 0 2px ${color}20` : 'var(--shadow-sm)'; }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <div style={{
@@ -67,17 +73,32 @@ function SummaryCard({ label, value, icon: Icon, color, sub, loading }) {
         </div>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-3)' }}>{label}</div>
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1 }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1 }}>
         {loading ? <Loader size={18} style={{ animation: 'spin 1s linear infinite' }} /> : value}
       </div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 12, color: highlight ? color : 'var(--text-3)', fontWeight: highlight ? 600 : 400, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
 
 // ── Category accordion section ──────────────────────────────────────────────
 
-function CategorySection({ category, products, values, onChange, isOpen, onToggle, isSubmitted }) {
+function CategorySection({
+  category,
+  products,
+  values,
+  onChange,
+  isOpen,
+  onToggle,
+  isSubmitted,
+  isSaturday,
+  isSunday,
+  prevTradingDate,
+  prevDayData,
+  rawMaterials,
+  onRecalculateBrought,
+  friedPenalty,
+}) {
   const CatIcon = CATEGORY_ICONS[category.key] || Package;
   const filledCount = products.filter(p => (values[p.key] ?? 0) > 0).length;
 
@@ -90,6 +111,7 @@ function CategorySection({ category, products, values, onChange, isOpen, onToggl
     }}>
       {/* Header */}
       <button
+        type="button"
         onClick={onToggle}
         style={{
           display: 'flex', alignItems: 'center', gap: 12, width: '100%',
@@ -107,8 +129,9 @@ function CategorySection({ category, products, values, onChange, isOpen, onToggl
           <CatIcon size={18} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{category.label}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>({category.labelMy})</span>
             <span style={{
               fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
               background: filledCount > 0 ? category.color + '15' : '#f4f4f5',
@@ -116,6 +139,16 @@ function CategorySection({ category, products, values, onChange, isOpen, onToggl
             }}>
               {filledCount}/{products.length}
             </span>
+            {category.key === 'brought_to_stall' && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#7c3aed', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: 4 }}>
+                Formula Automated
+              </span>
+            )}
+            {category.key === 'remaining_fried' && friedPenalty?.qualifiesForPenalty && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '1px 6px', borderRadius: 4 }}>
+                ⚠️ RM {friedPenalty.totalCharge.toFixed(2)} Penalty
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{category.description}</div>
         </div>
@@ -127,76 +160,336 @@ function CategorySection({ category, products, values, onChange, isOpen, onToggl
         </div>
       </button>
 
-      {/* Product rows */}
+      {/* Accordion content */}
       {isOpen && (
         <div style={{
           padding: '0 18px 16px', borderTop: '1px solid var(--border-soft)',
           animation: 'fadeIn 0.15s ease',
         }}>
+          {/* ── Context Notice Banner for Category ── */}
+          {category.key === 'brought_to_stall' && (
+            <div style={{
+              marginTop: 12, marginBottom: 12, padding: '10px 14px', borderRadius: 8,
+              background: isSaturday ? '#fef2f2' : (isSunday ? '#eff6ff' : '#f8fafc'),
+              border: `1px solid ${isSaturday ? '#fecaca' : (isSunday ? '#bfdbfe' : '#e2e8f0')}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
+            }}>
+              <div style={{ fontSize: 12, color: isSaturday ? '#dc2626' : (isSunday ? '#1d4ed8' : 'var(--text-2)'), display: 'flex', alignItems: 'center', gap: 6 }}>
+                {isSaturday ? <AlertTriangle size={15} /> : <Calculator size={15} color="var(--primary)" />}
+                <span>
+                  {isSaturday
+                    ? 'Saturday Closed: Stall is closed today. Brought to stall pieces are formula-set to 0.'
+                    : (isSunday
+                        ? `Sunday Trading: Automatically carrying over Friday's unfried leftovers (${prevTradingDate || 'Friday'}).`
+                        : 'Excel Formula Flow: Chicken & Carcass Brought to Stall = Yesterday\'s Unfried + Today\'s Received.')}
+                </span>
+              </div>
+              {!isSubmitted && (
+                <button
+                  type="button"
+                  onClick={onRecalculateBrought}
+                  className="btn btn-outline btn-sm"
+                  style={{ fontSize: 11, padding: '4px 10px', gap: 5, background: '#fff' }}
+                  title="Re-run Excel formulas to prefill brought items"
+                >
+                  <RotateCcw size={12} /> Re-sync Formulas
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Baki Dah Goreng Harian Penalty Box ── */}
+          {category.key === 'remaining_fried' && friedPenalty && (
+            <div style={{
+              marginTop: 12, marginBottom: 14, padding: '12px 14px', borderRadius: 8,
+              background: friedPenalty.qualifiesForPenalty ? '#fff1f2' : '#f0fdf4',
+              border: `1.5px solid ${friedPenalty.qualifiesForPenalty ? '#fecdd3' : '#bbf7d0'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: friedPenalty.qualifiesForPenalty ? '#e11d48' : '#15803d' }}>
+                  {friedPenalty.qualifiesForPenalty ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+                  Baki Dah Goreng Harian (Fried Leftover Penalty)
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                  background: friedPenalty.qualifiesForPenalty ? '#ffe4e6' : '#dcfce7',
+                  color: friedPenalty.qualifiesForPenalty ? '#be123c' : '#166534',
+                }}>
+                  {friedPenalty.qualifiesForPenalty ? `Penalty: RM ${friedPenalty.totalCharge.toFixed(2)}` : 'Exempt (RM 0.00)'}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.4, marginBottom: 8 }}>
+                <strong>Policy:</strong> If daily leftover fried pieces (Chicken + Carcass) reach <strong>5 or more</strong>, a waste deduction of <strong>RM 5.00 / piece</strong> applies to all leftover pieces that day, split 50/50 between on-duty staff (<strong>RM 2.50 / pc</strong> each). Leftovers under 5 pieces are exempt (RM 0.00).
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: friedPenalty.qualifiesForPenalty ? '#be123c' : '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                <span>Total Leftover Fried: <strong>{friedPenalty.totalFriedLeft} pcs</strong> (Chicken: {friedPenalty.ayamFriedLeft}, Carcass: {friedPenalty.rangkaFriedLeft})</span>
+                <span>
+                  {friedPenalty.qualifiesForPenalty
+                    ? `Payslip Deduction (50% share): −RM ${friedPenalty.perStaffDeduction.toFixed(2)}`
+                    : `✓ Safe (< 5 pieces): RM 0.00 deduction`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ── Remaining Unfried Policy Box ── */}
+          {category.key === 'remaining_unfried' && (
+            <div style={{
+              marginTop: 12, marginBottom: 12, padding: '9px 12px', borderRadius: 8,
+              background: '#fffbeb', border: '1px solid #fef3c7', fontSize: 12, color: '#92400e',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <Info size={15} style={{ flexShrink: 0, color: '#d97706' }} />
+              <span>
+                <strong>Carryover Rule:</strong> Only uncooked items carry over to the next operating day's Brought to Stall. Fried leftovers do not carry forward.
+              </span>
+            </div>
+          )}
+
           {/* Column headers */}
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 80px 80px',
-            gap: 8, padding: '12px 0 8px',
+            display: 'grid', gridTemplateColumns: '1fr 80px 90px',
+            gap: 8, padding: '8px 0',
             fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
             textTransform: 'uppercase', color: 'var(--text-3)',
           }}>
-            <div>Product</div>
+            <div>Product & Details</div>
             <div style={{ textAlign: 'center' }}>UoM</div>
             <div style={{ textAlign: 'right' }}>Qty</div>
           </div>
 
-          {products.map((prod, idx) => (
-            <div
-              key={prod.key}
-              style={{
-                display: 'grid', gridTemplateColumns: '1fr 80px 80px',
-                gap: 8, alignItems: 'center',
-                padding: '10px 0',
-                borderBottom: idx < products.length - 1 ? '1px solid var(--border-soft)' : 'none',
-              }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-                <span>{prod.label}</span>
-                {prod.adminOnly && (
-                  <span style={{ fontSize: 9, fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: 4 }}>
-                    Admin Bill KG
-                  </span>
-                )}
-                {category.key === 'raw_materials' && prod.key === 'chicken_pcs' && (
-                  <span style={{ fontSize: 9, fontWeight: 700, color: '#3b82f6', background: '#eff6ff', padding: '1px 5px', borderRadius: 4 }}>
-                    1 whole = 9 pcs
-                  </span>
-                )}
+          {products.map((prod, idx) => {
+            // Helper formula computation for brought_to_stall rows:
+            let formulaInfo = null;
+            if (category.key === 'brought_to_stall' && prod.isCalculated) {
+              if (prod.key === 'chicken_pcs') {
+                const prevUnfried = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
+                const rawReceived = Number(rawMaterials?.chicken_pcs || 0) || (Number(rawMaterials?.chicken_whole || 0) * 9);
+                const expectedVal = isSaturday ? 0 : prevUnfried + rawReceived;
+                const currentVal = Number(values[prod.key] ?? 0);
+                formulaInfo = {
+                  expectedVal,
+                  text: isSaturday ? 'Stall closed (= 0)' : `Unfried (${prevUnfried}) + Received (${rawReceived}) = ${expectedVal}`,
+                  isOverridden: currentVal !== expectedVal,
+                };
+              } else if (prod.key === 'carcass_pcs') {
+                const prevUnfried = Number(prevDayData?.remaining_unfried?.carcass_pcs || 0);
+                const rawReceived = Number(rawMaterials?.carcass_pcs || 0);
+                const expectedVal = isSaturday ? 0 : prevUnfried + rawReceived;
+                const currentVal = Number(values[prod.key] ?? 0);
+                formulaInfo = {
+                  expectedVal,
+                  text: isSaturday ? 'Stall closed (= 0)' : `Unfried (${prevUnfried}) + Received (${rawReceived}) = ${expectedVal}`,
+                  isOverridden: currentVal !== expectedVal,
+                };
+              } else if (prod.key === 'chicken_neck_set') {
+                const rawNeck = Number(rawMaterials?.neck || 0);
+                const expectedVal = Math.floor(rawNeck / 4);
+                const currentVal = Number(values[prod.key] ?? 0);
+                formulaInfo = {
+                  expectedVal,
+                  text: `Raw Neck (${rawNeck} pcs) ÷ 4 = ${expectedVal}`,
+                  isOverridden: currentVal !== expectedVal,
+                };
+              }
+            }
+
+            return (
+              <div
+                key={prod.key}
+                style={{
+                  display: 'grid', gridTemplateColumns: '1fr 80px 90px',
+                  gap: 8, alignItems: 'center',
+                  padding: '10px 0',
+                  borderBottom: idx < products.length - 1 ? '1px solid var(--border-soft)' : 'none',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                    <span>{prod.label}</span>
+                    {prod.adminOnly && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: 4 }}>
+                        Admin Bill KG
+                      </span>
+                    )}
+                    {category.key === 'raw_materials' && prod.key === 'chicken_pcs' && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#3b82f6', background: '#eff6ff', padding: '1px 5px', borderRadius: 4 }}>
+                        1 whole = 9 pcs
+                      </span>
+                    )}
+                    {prod.isCalculated && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#7c3aed', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '1px 5px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Sparkles size={10} /> Auto
+                      </span>
+                    )}
+                  </div>
+                  {formulaInfo && (
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <span>Formula: {formulaInfo.text}</span>
+                      {formulaInfo.isOverridden && !isSubmitted && (
+                        <button
+                          type="button"
+                          onClick={() => onChange(prod.key, formulaInfo.expectedVal)}
+                          style={{
+                            background: '#f4f4f5', border: '1px solid #d4d4d8', borderRadius: 4,
+                            padding: '1px 5px', color: 'var(--primary)', cursor: 'pointer',
+                            fontSize: 10, fontWeight: 700,
+                          }}
+                          title="Restore calculated formula value"
+                        >
+                          ↺ Reset ({formulaInfo.expectedVal})
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div style={{
+                  textAlign: 'center', fontSize: 11, fontWeight: 600,
+                  color: 'var(--text-3)', background: '#f4f4f5',
+                  borderRadius: 6, padding: '4px 0',
+                }}>
+                  {prod.uomLabel}
+                </div>
+                <div>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={values[prod.key] ?? ''}
+                    onChange={e => onChange(prod.key, e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    disabled={isSubmitted}
+                    placeholder="0"
+                    style={{
+                      width: '100%', padding: '7px 8px',
+                      border: `1.5px solid ${formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : 'var(--border)'}`,
+                      borderRadius: 8, fontSize: 13, fontWeight: 600,
+                      textAlign: 'right', fontFamily: 'var(--font)',
+                      color: 'var(--text-1)', background: isSubmitted ? '#fafafa' : (formulaInfo && !formulaInfo.isOverridden ? '#faf5ff' : '#fff'),
+                      outline: 'none', transition: 'border-color 0.15s',
+                    }}
+                    onFocus={e => { if (!isSubmitted) e.target.style.borderColor = category.color; }}
+                    onBlur={e => { e.target.style.borderColor = formulaInfo && !formulaInfo.isOverridden ? '#c4b5fd' : 'var(--border)'; }}
+                  />
+                </div>
               </div>
-              <div style={{
-                textAlign: 'center', fontSize: 11, fontWeight: 600,
-                color: 'var(--text-3)', background: '#f4f4f5',
-                borderRadius: 6, padding: '4px 0',
-              }}>
-                {prod.uomLabel}
-              </div>
-              <div>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={values[prod.key] ?? ''}
-                  onChange={e => onChange(prod.key, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                  disabled={isSubmitted}
-                  placeholder="0"
-                  style={{
-                    width: '100%', padding: '7px 8px', border: '1.5px solid var(--border)',
-                    borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    textAlign: 'right', fontFamily: 'var(--font)',
-                    color: 'var(--text-1)', background: isSubmitted ? '#fafafa' : '#fff',
-                    outline: 'none', transition: 'border-color 0.15s',
-                  }}
-                  onFocus={e => { if (!isSubmitted) e.target.style.borderColor = category.color; }}
-                  onBlur={e => { e.target.style.borderColor = 'var(--border)'; }}
-                />
-              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Daily Reconciliation (ProductInventory) Panel ──────────────────────────
+
+function DailyReconciliationPanel({ formData, isMobile }) {
+  const friedAndSold = useMemo(() => getFriedAndSoldQuantities(formData), [formData]);
+  const brought = formData.brought_to_stall || {};
+  const remUnfried = formData.remaining_unfried || {};
+  const remFried = formData.remaining_fried || {};
+  const otherRem = formData.other_remaining || {};
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <div style={{
+      background: '#fff', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
+      boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 16,
+    }}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(o => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 18px', background: 'transparent', border: 'none', cursor: 'pointer',
+          textAlign: 'left', fontFamily: 'var(--font)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: 'rgba(22, 163, 74, 0.12)', color: '#16a34a',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <TrendingUp size={18} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>
+                Live Reconciliation (ProductInventory)
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: '#dcfce7', color: '#15803d' }}>
+                Excel Formulas
+              </span>
             </div>
-          ))}
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+              Fried = Brought − Unfried &nbsp;|&nbsp; Sold = Fried − Left Fried
+            </div>
+          </div>
+        </div>
+        <div style={{ color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          <ChevronRight size={18} />
+        </div>
+      </button>
+
+      {isOpen && (
+        <div style={{ padding: '0 18px 16px', borderTop: '1px solid var(--border-soft)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid var(--border)', color: 'var(--text-3)', textAlign: 'right' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 700 }}>Item</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Brought</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Uncooked Left</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: 'var(--primary)' }}>Fried Qty</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700 }}>Fried Left</th>
+                  <th style={{ padding: '8px 6px', fontWeight: 700, color: '#15803d' }}>Units Sold</th>
+                </tr>
+              </thead>
+              <tbody>
+                {FRIED_ITEMS.map((item) => {
+                  const broughtQty = Number(brought[item.broughtKey] || 0);
+                  const unfriedQty = Number(remUnfried[item.remainingKey] || 0);
+                  const friedQty = Math.max(0, broughtQty - unfriedQty);
+                  const leftFriedQty = Number(remFried[item.remainingKey] || 0);
+                  const soldQty = Math.max(0, friedQty - leftFriedQty);
+
+                  return (
+                    <tr key={item.key} style={{ borderBottom: '1px solid var(--border-soft)', textAlign: 'right' }}>
+                      <td style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600, color: 'var(--text-1)' }}>
+                        {item.label} <span style={{ fontSize: 10, color: 'var(--text-3)' }}>({item.unit})</span>
+                      </td>
+                      <td style={{ padding: '8px 6px', color: 'var(--text-2)' }}>{broughtQty}</td>
+                      <td style={{ padding: '8px 6px', color: 'var(--text-3)' }}>− {unfriedQty}</td>
+                      <td style={{ padding: '8px 6px', fontWeight: 700, color: 'var(--primary)' }}>= {friedQty}</td>
+                      <td style={{ padding: '8px 6px', color: leftFriedQty > 0 ? '#ef4444' : 'var(--text-3)' }}>
+                        − {leftFriedQty}
+                      </td>
+                      <td style={{ padding: '8px 6px', fontWeight: 700, color: '#15803d' }}>= {soldQty}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{
+            marginTop: 12, padding: '10px 12px', borderRadius: 8,
+            background: '#f8fafc', border: '1px solid #e2e8f0',
+            fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Info size={13} color="var(--primary)" /> Non-fried items (Rice, Kulit, Sauces): Sold = Brought − Other Remaining
+            </span>
+            <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>
+              Nasi Sold: {Math.max(0, Number(brought.butter_rice || 0) - Number(otherRem.butter_rice || 0))} sets &nbsp;|&nbsp;
+              Kulit Sold: {Math.max(0, Number(brought.skin || 0) - Number(otherRem.skin || 0))} pcs &nbsp;|&nbsp;
+              Sauces Sold: {Math.max(0, Number(brought.cheese_sauce || 0) - Number(otherRem.cheese_sauce || 0)) +
+                           Math.max(0, Number(brought.korean_sauce || 0) - Number(otherRem.korean_sauce || 0)) +
+                           Math.max(0, Number(brought.green_sauce || 0) - Number(otherRem.green_sauce || 0)) +
+                           Math.max(0, Number(brought.bbq_sauce || 0) - Number(otherRem.bbq_sauce || 0))} pcs
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -471,13 +764,23 @@ export default function StaffDashboardPage({ isMobile }) {
     return () => { cancelled = true; };
   }, [selectedDate]);
 
-  // ─── Load previous day data for carry-forward ────────────────────────────
+  // ─── Weekday & Operating Schedule helpers ──────────────────────────────
+  const dateObj = useMemo(() => new Date(selectedDate + 'T00:00:00'), [selectedDate]);
+  const dayOfWeek = dateObj.getDay(); // 0 is Sunday, 6 is Saturday
+  const isSaturday = dayOfWeek === 6;
+  const isSunday = dayOfWeek === 0;
+  const prevTradingDate = useMemo(() => getPreviousTradingDate(selectedDate), [selectedDate]);
+
+  // ─── Load previous day data for carry-forward (Friday for Sunday, else yesterday) ───
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const prevDate = shiftDate(selectedDate, -1);
-        const doc = await dailyInventoryService.getByDate(prevDate);
+        let doc = await dailyInventoryService.getByDate(prevTradingDate);
+        if (!doc?.data && isSunday) {
+          // If Friday wasn't logged, fallback to Saturday
+          doc = await dailyInventoryService.getByDate(shiftDate(selectedDate, -1));
+        }
         if (!cancelled) {
           setPrevDayData(doc?.data || null);
         }
@@ -486,9 +789,33 @@ export default function StaffDashboardPage({ isMobile }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedDate]);
+  }, [selectedDate, prevTradingDate, isSunday]);
 
-  // ─── Update a single product value ──────────────────────────────────────
+  // ─── Auto-prefill brought_to_stall if draft & empty ────────────────────
+  useEffect(() => {
+    if (status !== 'submitted' && prevDayData && !loading) {
+      setFormData(prev => {
+        const brought = prev.brought_to_stall || {};
+        const isBroughtEmpty = (brought.chicken_pcs === 0 || brought.chicken_pcs == null) &&
+                               (brought.carcass_pcs === 0 || brought.carcass_pcs == null);
+        if (isBroughtEmpty) {
+          const autoBrought = calculateBroughtToStall(prev.raw_materials, prevDayData?.remaining_unfried, isSaturday);
+          return {
+            ...prev,
+            brought_to_stall: {
+              ...brought,
+              chicken_pcs: autoBrought.chicken_pcs,
+              carcass_pcs: autoBrought.carcass_pcs,
+              chicken_neck_set: autoBrought.chicken_neck_set,
+            }
+          };
+        }
+        return prev;
+      });
+    }
+  }, [prevDayData, status, isSaturday, loading]);
+
+  // ─── Update a single product value (reactive Excel formulas) ───────────
   const handleChange = useCallback((categoryKey, productKey, value) => {
     setFormData(prev => {
       const nextCategory = {
@@ -496,23 +823,113 @@ export default function StaffDashboardPage({ isMobile }) {
         [productKey]: value,
       };
 
-      // 1 WHOLE chicken is portioned into 9 pieces of chicken:
-      if (categoryKey === 'raw_materials' && productKey === 'chicken_whole') {
-        const wholeCount = Number(value) || 0;
-        nextCategory.chicken_pcs = Math.round(wholeCount * 9);
-      }
-
-      return {
+      const nextFormData = {
         ...prev,
         [categoryKey]: nextCategory,
       };
+
+      // ── Updated Excel Flow Automations ──
+      if (categoryKey === 'raw_materials') {
+        const prevUnfriedChicken = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
+        const prevUnfriedCarcass = Number(prevDayData?.remaining_unfried?.carcass_pcs || 0);
+
+        // 1 WHOLE chicken is portioned into 9 pieces of chicken:
+        if (productKey === 'chicken_whole') {
+          const wholeCount = Number(value) || 0;
+          const pieces = Math.round(wholeCount * 9);
+          nextCategory.chicken_pcs = pieces;
+
+          // Auto-calculate brought_to_stall.chicken_pcs (yesterday unfried + today received):
+          if (!isSaturday) {
+            nextFormData.brought_to_stall = {
+              ...nextFormData.brought_to_stall,
+              chicken_pcs: prevUnfriedChicken + pieces,
+            };
+          }
+        } else if (productKey === 'chicken_pcs') {
+          const pieces = Number(value) || 0;
+          if (!isSaturday) {
+            nextFormData.brought_to_stall = {
+              ...nextFormData.brought_to_stall,
+              chicken_pcs: prevUnfriedChicken + pieces,
+            };
+          }
+        } else if (productKey === 'carcass_pcs') {
+          const pieces = Number(value) || 0;
+          if (!isSaturday) {
+            nextFormData.brought_to_stall = {
+              ...nextFormData.brought_to_stall,
+              carcass_pcs: prevUnfriedCarcass + pieces,
+            };
+          }
+        } else if (productKey === 'neck') {
+          const pieces = Number(value) || 0;
+          // Leher SET = ROUNDDOWN(PC / 4)
+          nextFormData.brought_to_stall = {
+            ...nextFormData.brought_to_stall,
+            chicken_neck_set: Math.floor(pieces / 4),
+          };
+        }
+      }
+
+      return nextFormData;
     });
-  }, []);
+  }, [prevDayData, isSaturday]);
 
   // ─── Toggle category accordion ──────────────────────────────────────────
   const toggleCategory = useCallback((catKey) => {
     setOpenCategories(prev => ({ ...prev, [catKey]: !prev[catKey] }));
   }, []);
+
+  // ─── Re-sync Brought to Stall with Excel formulas ───────────────────────
+  const handleRecalculateBrought = useCallback(() => {
+    setFormData(prev => {
+      const autoBrought = calculateBroughtToStall(
+        prev.raw_materials,
+        prevDayData?.remaining_unfried,
+        isSaturday
+      );
+      return {
+        ...prev,
+        brought_to_stall: {
+          ...prev.brought_to_stall,
+          chicken_pcs: autoBrought.chicken_pcs,
+          carcass_pcs: autoBrought.carcass_pcs,
+          chicken_neck_set: autoBrought.chicken_neck_set,
+        }
+      };
+    });
+    setSaveMsg({ type: 'success', text: 'Brought to stall updated with Excel formulas!' });
+    setTimeout(() => setSaveMsg(null), 3000);
+  }, [prevDayData, isSaturday]);
+
+  // ─── Mark Saturday Closed ────────────────────────────────────────────────
+  const handleMarkSaturdayClosed = useCallback(() => {
+    setFormData(prev => ({
+      ...prev,
+      brought_to_stall: {
+        ...prev.brought_to_stall,
+        chicken_pcs: 0,
+        carcass_pcs: 0,
+        chicken_neck_set: 0,
+        mushroom: 0,
+        butter_rice: 0,
+        skin: 0,
+        cheese_sauce: 0,
+        korean_sauce: 0,
+        green_sauce: 0,
+        bbq_sauce: 0,
+      }
+    }));
+    setNotes(prev => prev ? (prev.includes('Saturday') ? prev : prev + ' (Stall closed on Saturday)') : 'Stall closed on Saturday');
+    setSaveMsg({ type: 'success', text: 'Stall marked as closed for Saturday.' });
+    setTimeout(() => setSaveMsg(null), 3000);
+  }, []);
+
+  // ─── Sync with previous day unfried ─────────────────────────────────────
+  const handleSyncPreviousDay = useCallback(() => {
+    handleRecalculateBrought();
+  }, [handleRecalculateBrought]);
 
   // ─── Save as draft or final submit ──────────────────────────────────────
   const handleSave = useCallback(async (finalSubmit = false) => {
@@ -546,28 +963,6 @@ export default function StaffDashboardPage({ isMobile }) {
     }
   }, [selectedDate, formData, notes, profile]);
 
-  // ─── Carry forward from yesterday ──────────────────────────────────────
-  const handleCarryForward = useCallback(() => {
-    if (!prevDayData) return;
-    setFormData(prev => {
-      const next = { ...prev };
-      // Carry forward: remaining_unfried from yesterday becomes part of raw_materials today
-      if (prevDayData.remaining_unfried) {
-        const rawMaterials = { ...next.raw_materials };
-        // Map common keys
-        for (const key of Object.keys(prevDayData.remaining_unfried)) {
-          if (rawMaterials[key] != null) {
-            rawMaterials[key] = prevDayData.remaining_unfried[key];
-          }
-        }
-        next.raw_materials = rawMaterials;
-      }
-      return next;
-    });
-    setSaveMsg({ type: 'success', text: 'Carried forward from previous day!' });
-    setTimeout(() => setSaveMsg(null), 3000);
-  }, [prevDayData]);
-
   // ─── Summary computations ──────────────────────────────────────────────
   const summaryStats = useMemo(() => {
     const rawTotal = Object.values(formData.raw_materials || {}).reduce((s, v) => s + (v || 0), 0);
@@ -586,6 +981,11 @@ export default function StaffDashboardPage({ isMobile }) {
   );
   const chickenSoldToday = friedAndSold.sold.chicken_pcs || 0;
   const carcassSoldToday = friedAndSold.sold.carcass_pcs || 0;
+
+  // ─── Baki Dah Goreng Harian (Fried Leftover Penalty) ───────────────────
+  const friedLeftoverPenalty = useMemo(() => {
+    return calculateFriedLeftoverPenalty(formData);
+  }, [formData]);
 
   // ─── Render ────────────────────────────────────────────────────────────
   // Format check in / out times for display
@@ -941,11 +1341,12 @@ export default function StaffDashboardPage({ isMobile }) {
 
           {prevDayData && !isSubmitted && (
             <button
-              onClick={handleCarryForward}
+              onClick={handleSyncPreviousDay}
               className="btn btn-outline btn-sm"
-              style={{ fontSize: 12, gap: 4 }}
+              style={{ fontSize: 12, gap: 5 }}
+              title={`Carrying over from ${formatDateDisplay(prevTradingDate)}`}
             >
-              <ArrowRight size={13} /> Carry Forward
+              <RotateCcw size={13} /> Sync from {isSunday ? 'Friday' : 'Previous Day'}
             </button>
           )}
         </div>
@@ -969,15 +1370,20 @@ export default function StaffDashboardPage({ isMobile }) {
         />
         <SummaryCard
           label="To Stall" value={summaryStats.stallTotal.toFixed(1)} icon={Truck}
-          color="#8b5cf6" sub="Items taken" loading={loading}
+          color="#8b5cf6" sub="Auto calculated" loading={loading}
         />
         <SummaryCard
-          label="Left Fried" value={summaryStats.friedTotal.toFixed(1)} icon={Flame}
-          color="#ef4444" sub="Unsold" loading={loading}
+          label="Left Fried" value={friedLeftoverPenalty.totalFriedLeft} icon={Flame}
+          color={friedLeftoverPenalty.qualifiesForPenalty ? '#ef4444' : '#16a34a'}
+          highlight={friedLeftoverPenalty.qualifiesForPenalty}
+          sub={friedLeftoverPenalty.qualifiesForPenalty
+            ? `⚠️ RM ${friedLeftoverPenalty.perStaffDeduction.toFixed(2)} / staff`
+            : (friedLeftoverPenalty.totalFriedLeft > 0 ? '✓ Safe (<5 pcs)' : '0 unsold')}
+          loading={loading}
         />
         <SummaryCard
           label="Left Unfried" value={summaryStats.unfriedTotal.toFixed(1)} icon={PackageOpen}
-          color="#f59e0b" sub="Carry over" loading={loading}
+          color="#f59e0b" sub="Carries over" loading={loading}
         />
         <SummaryCard
           label="Chicken Sold" value={chickenSoldToday.toFixed(1)} icon={CheckCircle2}
@@ -988,8 +1394,13 @@ export default function StaffDashboardPage({ isMobile }) {
           color="#16a34a" sub="Pcs today" loading={loading}
         />
         <SummaryCard
-          label="Other Left" value={summaryStats.otherTotal.toFixed(1)} icon={MoreHorizontal}
-          color="#10b981" sub="Sides & sauces" loading={loading}
+          label="Waste Charge"
+          value={`RM ${friedLeftoverPenalty.totalCharge.toFixed(2)}`}
+          icon={AlertTriangle}
+          color={friedLeftoverPenalty.qualifiesForPenalty ? '#dc2626' : '#71717a'}
+          highlight={friedLeftoverPenalty.qualifiesForPenalty}
+          sub={friedLeftoverPenalty.qualifiesForPenalty ? `RM ${friedLeftoverPenalty.perStaffDeduction.toFixed(2)} staff share` : 'RM 0.00 (<5 pcs safe)'}
+          loading={loading}
         />
       </div>
 
@@ -999,7 +1410,7 @@ export default function StaffDashboardPage({ isMobile }) {
         gridTemplateColumns: isMobile ? '1fr' : '1fr 260px',
         gap: 16,
       }}>
-        {/* Left: Category forms */}
+        {/* Left: Category forms + Reconciliation table */}
         <div>
           {loading ? (
             <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-3)' }}>
@@ -1018,8 +1429,18 @@ export default function StaffDashboardPage({ isMobile }) {
                   isOpen={!!openCategories[cat.key]}
                   onToggle={() => toggleCategory(cat.key)}
                   isSubmitted={isSubmitted}
+                  isSaturday={isSaturday}
+                  isSunday={isSunday}
+                  prevTradingDate={prevTradingDate}
+                  prevDayData={prevDayData}
+                  rawMaterials={formData.raw_materials}
+                  onRecalculateBrought={handleRecalculateBrought}
+                  friedPenalty={friedLeftoverPenalty}
                 />
               ))}
+
+              {/* ──── Live Sales & Fried Reconciliation (Excel ProductInventory) ──── */}
+              <DailyReconciliationPanel formData={formData} isMobile={isMobile} />
 
               {/* Notes */}
               <div style={{

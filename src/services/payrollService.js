@@ -44,7 +44,8 @@ export function calculateStaffDailyPay(params) {
     clockOutHour = 0,
     clockOutMin = 0,
     pinjamMakan = 0, // Daily meal advance (+RM10 added to payout)
-    pinjamDuit = 0   // Cash advance deduction (-RM)
+    pinjamDuit = 0,  // Cash advance deduction (-RM)
+    bakiDahGorengDeduction = 0 // Fried leftover penalty deduction (-RM) from BakiDahGorengHarian
   } = params;
 
   if (role === 'pengurusan') {
@@ -56,6 +57,7 @@ export function calculateStaffDailyPay(params) {
       otPay: 0,
       pinjamMakan: 0,
       pinjamDuit: 0,
+      bakiDahGorengDeduction: 0,
       managementPay: 100.00,
       totalPay: 100.00
     };
@@ -67,9 +69,10 @@ export function calculateStaffDailyPay(params) {
   const basuhAyamPay = (Number(ayamBasuhEkor || 0) * 1.00) / washDivisor;
   const basuhRangkaPay = (Number(rangkaBasuhKg || 0) * 1.00) / washDivisor;
   const otPay = role === 'jaga_gerai' ? calculateOTPay(clockInHour, clockInMin, clockOutHour, clockOutMin) : 0;
-  const deduction = Math.abs(Number(pinjamDuit || 0));
+  const friedDeduction = Math.abs(Number(bakiDahGorengDeduction || 0));
+  const deduction = Math.abs(Number(pinjamDuit || 0)) + friedDeduction;
 
-  // Pinjam Makan is added (+) to daily gross total, Pinjam Duit is deducted (-)
+  // Pinjam Makan is added (+) to daily gross total, Pinjam Duit and Baki Dah Goreng are deducted (-)
   const grossPay = jagaGeraiPay + cendawanPay + basuhAyamPay + basuhRangkaPay + otPay + Number(pinjamMakan || 0);
   const totalPay = Math.max(0, grossPay - deduction);
 
@@ -80,7 +83,8 @@ export function calculateStaffDailyPay(params) {
     basuhRangkaPay: Number(basuhRangkaPay.toFixed(2)),
     otPay: Number(otPay.toFixed(2)),
     pinjamMakan: Number(pinjamMakan || 0),
-    pinjamDuit: deduction,
+    pinjamDuit: Math.abs(Number(pinjamDuit || 0)),
+    bakiDahGorengDeduction: Number(friedDeduction.toFixed(2)),
     managementPay: 0,
     totalPay: Number(totalPay.toFixed(2))
   };
