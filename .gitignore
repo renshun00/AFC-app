@@ -17,7 +17,9 @@ dev-dist/
 
 # ── Firebase ──────────────────────────────────────────────────────────────────
 *-firebase-adminsdk-*.json
+firebase.json
 serviceAccountKey.json
+firestore.indexes.json
 firebase-debug.log
 firestore-debug.log
 database-debug.log
@@ -48,6 +50,11 @@ Thumbs.db
 *.local
 excel_analysis.md
 UNIFIED_APP_FLOW_PLAN.md
+DEVELOPER_HANDOVER_GUIDE.md
+APP_FLOW_MEMORY.md
+AGENTS.md
+
+
 
 # ── Spreadsheets ─────────────────────────────────────────────────────────────
 *.xlsx

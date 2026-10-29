@@ -46,12 +46,13 @@ import {
   addDoc, setDoc, updateDoc, deleteDoc,
   getDoc, getDocs,
   query, where, orderBy, limit,
-  serverTimestamp, Timestamp,
+  serverTimestamp, Timestamp, runTransaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFriedAndSoldQuantities, getRawMaterialUsage } from '../utils/dailyFlowCalculator';
+import { getFriedAndSoldQuantities, getRawMaterialUsage, getMalaysiaDate } from '../utils/dailyFlowCalculator';
+import { getInventoryCarryover, stockAfterReceiptUpdate } from '../utils/stallOpening.js';
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ export const salesOrderService = {
   create: (data) =>
     insert('sales_orders', {
       invoiceNumber: data.invoiceNumber ?? null,
-      date: data.date || (new Date()).toISOString().slice(0, 10),
+      date: data.date || getMalaysiaDate(),
       outletId: data.outletId ?? 'main_branch',
       staffId: data.staffId ?? 'pos_user',
       subtotal: data.subtotal ?? 0,
@@ -178,8 +179,8 @@ export const salesOrderService = {
     // 2. Fallback to createdAt range or memory filter if orders empty
     if (orders.length === 0) {
       try {
-        const start = new Date(dateString + 'T00:00:00');
-        const end = new Date(dateString + 'T23:59:59.999');
+        const start = new Date(dateString + 'T00:00:00+08:00');
+        const end = new Date(dateString + 'T23:59:59.999+08:00');
         const qRange = query(
           col('sales_orders'),
           where('createdAt', '>=', Timestamp.fromDate(start)),
@@ -203,12 +204,13 @@ export const salesOrderService = {
               if (o.date === dateString) return true;
               if (o.createdAt) {
                 const dt = o.createdAt.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
-                return dt.toISOString().slice(0, 10) === dateString;
+                return getMalaysiaDate(dt) === dateString;
               }
               return false;
             });
         } catch (memErr) {
           console.error('[salesOrderService] getDailySummary failed:', memErr);
+          throw memErr;
         }
       }
     }
@@ -1323,6 +1325,21 @@ export const supplierPurchaseService = {
 //   createdAt, updatedAt,
 // }
 export const dailyInventoryService = {
+  /** Reconstruct existing stock before this day's receiving and POS deductions. */
+  getOpeningInventory: async (date) => {
+    const start = Timestamp.fromDate(new Date(`${date}T00:00:00+08:00`));
+    const [products, transactions, orders] = await Promise.all([
+      getDocs(query(col('products'), where('isInventoryItem', '==', true))),
+      getDocs(query(col('inventory_transactions'), where('createdAt', '>=', start))),
+      getDocs(query(col('sales_orders'), where('createdAt', '>=', start))),
+    ]);
+    return getInventoryCarryover(
+      date,
+      products.docs.map(d => ({ id: d.id, ...d.data() })),
+      transactions.docs.map(d => ({ id: d.id, ...d.data() })),
+      Object.fromEntries(orders.docs.map(d => [d.id, d.data().date])),
+    );
+  },
   /** Save or update a day's inventory data (upsert by date). */
   save: (date, data, submittedBy, status = 'draft', notes = '') =>
     upsert('daily_inventory', date, {
@@ -1379,32 +1396,16 @@ export const dailyInventoryService = {
   sendReceivedStockToInventory: async (date, dayData, options = {}) => {
     const refId = `daily_received_${date}`;
 
-    // If previously applied for this date, revert prior transactions so new values apply cleanly
     const prior = await getDocs(query(col('inventory_transactions'), where('referenceId', '==', refId)));
-    if (!prior.empty) {
-      const priorNet = {};
-      for (const txDoc of prior.docs) {
-        const tx = txDoc.data();
-        if (tx.productId) {
-          priorNet[tx.productId] = (priorNet[tx.productId] || 0) + (Number(tx.qty) || 0);
-        }
-      }
-      for (const [productId, netQty] of Object.entries(priorNet)) {
-        const pRef = ref('products', productId);
-        const pSnap = await getDoc(pRef);
-        if (pSnap.exists()) {
-          const cur = Number(pSnap.data().stock) || 0;
-          const reverted = Math.max(0, Math.round((cur - netQty) * 1000) / 1000);
-          await updateDoc(pRef, { stock: reverted, updatedAt: serverTimestamp() });
-        }
-      }
-      for (const txDoc of prior.docs) {
-        await deleteDoc(txDoc.ref);
-      }
+    const legacyReceipt = {};
+    for (const txDoc of prior.docs) {
+      const tx = txDoc.data();
+      if (tx.productId) legacyReceipt[tx.productId] = (legacyReceipt[tx.productId] || 0) + (Number(tx.qty) || 0);
     }
 
     const raw = dayData?.raw_materials || {};
     const brought = dayData?.brought_to_stall || {};
+    const received = dayData?.stock_received || brought;
     const num = (v) => Number(v) || 0;
     const chickenReceivedPcs = num(raw.chicken_pcs) || num(raw.chicken_whole) * 9;
 
@@ -1415,15 +1416,15 @@ export const dailyInventoryService = {
       { label: 'Chicken Neck', aliases: ['chicken neck'], delta: num(raw.neck), type: 'DAILY_RECEIVED' },
       { label: 'Tube Ice', aliases: ['tube ice'], delta: num(raw.tube_ice), type: 'DAILY_RECEIVED' },
       { label: 'Cooking Oil (Packet)', aliases: ['cooking oil (packet)', 'cooking oil'], delta: num(raw.oil_topup_packet), type: 'DAILY_RECEIVED' },
-      { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(brought.cheese_sauce), type: 'DAILY_RECEIVED' },
-      { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(brought.korean_sauce), type: 'DAILY_RECEIVED' },
-      { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(brought.green_sauce), type: 'DAILY_RECEIVED' },
-      { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(brought.bbq_sauce), type: 'DAILY_RECEIVED' },
-      { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(brought.mushroom), type: 'DAILY_RECEIVED' },
+      { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(received.cheese_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(received.korean_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(received.green_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(received.bbq_sauce), type: 'DAILY_RECEIVED' },
+      { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(received.mushroom), type: 'DAILY_RECEIVED' },
+      ...(dayData?.stock_received ? [{ label: 'Butter Rice', aliases: ['butter rice', 'nasi butter'], delta: num(received.butter_rice), type: 'DAILY_RECEIVED' }] : []),
     ];
 
     movements = movements.filter(m => m.delta > 0);
-    if (movements.length === 0) return { updated: [], unmatched: [], skipped: false };
 
     const snap = await getDocs(query(col('products'), where('isInventoryItem', '==', true), where('isActive', '==', true)));
     const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1433,39 +1434,48 @@ export const dailyInventoryService = {
       return products.find(p => keys.includes(norm(p.name)));
     };
 
-    const running = {};
     const updated = [];
     const unmatched = [];
-
-    for (const m of movements) {
-      const match = findProduct(m.aliases);
-      if (!match) {
-        if (!unmatched.includes(m.label)) unmatched.push(m.label);
-        continue;
-      }
-      const current = running[match.id] ?? (Number(match.stock) || 0);
-      const next = Math.max(0, Math.round((current + m.delta) * 1000) / 1000);
-      running[match.id] = next;
-
-      await updateDoc(ref('products', match.id), { stock: next, updatedAt: serverTimestamp() });
-      await addDoc(col('inventory_transactions'), {
-        productId: match.id,
-        productName: match.name,
-        type: m.type,
-        qty: m.delta,
-        referenceId: refId,
-        createdAt: serverTimestamp(),
-      });
-      updated.push(`${match.name} +${m.delta}`);
+    const desired = {};
+    const names = {};
+    for (const movement of movements) {
+      const match = findProduct(movement.aliases);
+      if (!match) { unmatched.push(movement.label); continue; }
+      desired[match.id] = (desired[match.id] || 0) + movement.delta;
+      names[match.id] = match.name;
+      updated.push(`${match.name} +${movement.delta}`);
     }
 
-    try {
-      await updateDoc(ref('daily_inventory', date), {
-        stockReceivedSynced: true,
-        stockReceivedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+    // Apply the difference, never reverse to a clamped zero after some stock was sold.
+    // The day document serializes simultaneous sends; retry reads the last applied amounts.
+    await runTransaction(db, async transaction => {
+      const dayRef = ref('daily_inventory', date);
+      const day = await transaction.get(dayRef);
+      const previous = day.data()?.receiptQuantities || legacyReceipt;
+      const ids = [...new Set([...Object.keys(previous), ...Object.keys(desired)])];
+      const productSnaps = await Promise.all(ids.map(id => transaction.get(ref('products', id))));
+      const writes = productSnaps.map((product, index) => {
+        const id = ids[index];
+        if (!product.exists()) throw new Error('An inventory item was removed. Reload before sending stock.');
+        return { id, product, stock: stockAfterReceiptUpdate(product.data().stock, previous[id], desired[id]) };
       });
-    } catch (e) { }
+      const logIds = new Set(ids.map(id => `${refId}_${id}`));
+      for (const oldLog of prior.docs) {
+        if (!logIds.has(oldLog.id)) transaction.delete(oldLog.ref);
+      }
+      for (const { id, product, stock } of writes) {
+        transaction.update(product.ref, { stock, updatedAt: serverTimestamp() });
+        const logRef = ref('inventory_transactions', `${refId}_${id}`);
+        if (desired[id] > 0) {
+          transaction.set(logRef, { productId: id, productName: names[id] || product.data().name,
+            type: 'DAILY_RECEIVED', qty: desired[id], referenceId: refId, createdAt: serverTimestamp() });
+        } else transaction.delete(logRef);
+      }
+      transaction.set(dayRef, { receiptQuantities: desired, stockReceivedSynced: unmatched.length === 0,
+        stockReceivedAt: serverTimestamp(), updatedAt: serverTimestamp() }, {
+        mergeFields: ['receiptQuantities', 'stockReceivedSynced', 'stockReceivedAt', 'updatedAt'],
+      });
+    });
 
     return { updated, unmatched, success: true };
   },
@@ -1518,6 +1528,7 @@ export const dailyInventoryService = {
     const { fried, sold } = friedAndSold;
     const raw = dayData?.raw_materials || {};
     const brought = dayData?.brought_to_stall || {};
+    const received = dayData?.stock_received || brought;
     const remFried = dayData?.remaining_fried || {};
     const remUnfried = dayData?.remaining_unfried || {};
     const otherRem = dayData?.other_remaining || {};
@@ -1546,11 +1557,12 @@ export const dailyInventoryService = {
         { label: 'Chicken Neck', aliases: ['chicken neck'], delta: num(raw.neck), type: 'DAILY_RECEIVED' },
         { label: 'Tube Ice', aliases: ['tube ice'], delta: num(raw.tube_ice), type: 'DAILY_RECEIVED' },
         { label: 'Cooking Oil (Packet)', aliases: ['cooking oil (packet)', 'cooking oil'], delta: num(raw.oil_topup_packet), type: 'DAILY_RECEIVED' },
-        { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(brought.cheese_sauce), type: 'DAILY_RECEIVED' },
-        { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(brought.korean_sauce), type: 'DAILY_RECEIVED' },
-        { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(brought.green_sauce), type: 'DAILY_RECEIVED' },
-        { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(brought.bbq_sauce), type: 'DAILY_RECEIVED' },
-        { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(brought.mushroom), type: 'DAILY_RECEIVED' },
+        { label: 'Cheese Sauce', aliases: ['cheese sauce', 'cheese sauce (sos cheese)', 'sos cheese'], delta: num(received.cheese_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Korean Sauce', aliases: ['korean sauce', 'korean sauce (sos korean)', 'sos korean'], delta: num(received.korean_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Green Sauce', aliases: ['green sauce', 'green sauce (sos hijau)', 'sos hijau'], delta: num(received.green_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'BBQ Sauce', aliases: ['bbq sauce', 'bbq sauce (sos bbq)', 'sos bbq'], delta: num(received.bbq_sauce), type: 'DAILY_RECEIVED' },
+        { label: 'Mushroom', aliases: ['mushroom', 'mushroom (enoki)', 'enoki'], delta: num(received.mushroom), type: 'DAILY_RECEIVED' },
+        ...(dayData?.stock_received ? [{ label: 'Butter Rice', aliases: ['butter rice', 'nasi butter'], delta: num(received.butter_rice), type: 'DAILY_RECEIVED' }] : []),
       );
     }
 

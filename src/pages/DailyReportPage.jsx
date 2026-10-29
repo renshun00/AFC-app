@@ -21,18 +21,20 @@ import {
   calculateFriedLeftoverPenalty,
   computeAutoRemainders,
   getPreviousTradingDate,
+  getMalaysiaDate,
   shiftDate,
   FRIED_ITEMS,
   NON_FRIED_ITEMS,
 } from '../utils/dailyFlowCalculator';
 import { auth } from '../firebase';
+import StallOpeningSection from '../components/StallOpeningSection';
+import { loadStallDay, reconcileStallOpening } from '../utils/stallOpening.js';
 import { signInWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return getMalaysiaDate();
 }
 
 function formatDateDisplay(dateStr) {
@@ -105,6 +107,7 @@ function CategorySection({
   friedPenalty,
   chickenCutYield,
   onCutYieldChange,
+  busy = false,
 }) {
   const CatIcon = CATEGORY_ICONS[category.key] || Package;
   const filledCount = products.filter(p => (values[p.key] ?? 0) > 0).length;
@@ -330,7 +333,7 @@ function CategorySection({
             }
 
             const isAdminBillKgField = category.key === 'raw_materials' && (prod.key === 'chicken_kg' || prod.key === 'carcass_kg');
-            const isDisabled = isSubmitted && !(isAdmin && isAdminBillKgField);
+            const isDisabled = busy || (isSubmitted && !(isAdmin && isAdminBillKgField));
 
             return (
               <div
@@ -970,10 +973,15 @@ export default function StaffDashboardPage({ isMobile }) {
   const [formData, setFormData] = useState(buildEmptyDayData());
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('draft');       // 'draft' | 'submitted'
-  const [openCategories, setOpenCategories] = useState({ raw_materials: true });
+  const [openCategories, setOpenCategories] = useState({ raw_materials: true, brought_to_stall: true });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);         // { type, text }
-  const [loading, setLoading] = useState(true);
+  const [loadingState, setLoading] = useState(true);
+  const [loadedDate, setLoadedDate] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [openingInventory, setOpeningInventory] = useState({ balances: {}, warnings: [] });
+  const loading = loadingState || loadedDate !== selectedDate;
   const [recentEntries, setRecentEntries] = useState([]);
   const [recentLoading, setRecentLoading] = useState(true);
   const [prevDayData, setPrevDayData] = useState(null); // for carry-forward
@@ -1126,330 +1134,107 @@ export default function StaffDashboardPage({ isMobile }) {
     return () => { cancelled = true; };
   }, [saveMsg]); // refresh after save
 
-  // ─── Load data for selected date ────────────────────────────────────────
+  // Load every opening-stock dependency together, regardless of request completion order.
+  const dayOfWeek = new Date(selectedDate + 'T00:00:00Z').getUTCDay();
+  const isSaturday = dayOfWeek === 6;
+  const isSunday = dayOfWeek === 0;
+  const prevTradingDate = getPreviousTradingDate(selectedDate);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    (async () => {
-      try {
-        const doc = await dailyInventoryService.getByDate(selectedDate);
-        if (!cancelled) {
-          if (doc && doc.data) {
-            // Merge loaded data with template to ensure all keys exist
-            const merged = buildEmptyDayData();
-            for (const catKey of Object.keys(merged)) {
-              if (doc.data[catKey]) {
-                for (const prodKey of Object.keys(merged[catKey])) {
-                  if (doc.data[catKey][prodKey] != null) {
-                    merged[catKey][prodKey] = doc.data[catKey][prodKey];
-                  }
-                }
-              }
-            }
-            setFormData(merged);
-            setNotes(doc.notes || '');
-            setStatus(doc.status || 'draft');
-            setStockReceivedSynced(!!(doc.stockReceivedSynced || doc.status === 'submitted'));
-            const w = Number(merged.raw_materials?.chicken_whole || 0);
-            const p = Number(merged.raw_materials?.chicken_pcs || 0);
-            if (w > 0 && p > 0 && Math.round(p / w) === 8) {
-              setChickenCutYield(8);
-            } else {
-              setChickenCutYield(9);
-            }
-          } else {
-            setFormData(buildEmptyDayData());
-            setNotes('');
-            setStatus('draft');
-            setStockReceivedSynced(false);
-            setChickenCutYield(9);
-          }
-        }
-      } catch (err) {
-        console.error('[Dashboard] load error:', err);
-        if (!cancelled) {
-          setFormData(buildEmptyDayData());
-          setNotes('');
-          setStatus('draft');
-          setStockReceivedSynced(false);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedDate]);
-
-  // ─── Load POS daily sales summary for selectedDate ─────────────────────
-  useEffect(() => {
-    let cancelled = false;
     setPosLoading(true);
-    salesOrderService.getDailySummary(selectedDate)
-      .then(summary => {
-        if (!cancelled) {
-          setPosSummary(summary);
-          setPosLoading(false);
-          // Keep carryover and other remaining updated with POS sales
-          setFormData(prev => {
-            const autoRem = computeAutoRemainders(
-              prev.brought_to_stall,
-              prev.remaining_fried,
-              summary?.soldBreakdown || {}
-            );
-            return {
-              ...prev,
-              remaining_unfried: autoRem.remaining_unfried,
-              other_remaining: autoRem.other_remaining,
-            };
-          });
-        }
-      })
-      .catch(err => {
-        console.warn('[Dashboard] load POS summary error:', err);
-        if (!cancelled) setPosLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [selectedDate]);
-
-  // ─── Weekday & Operating Schedule helpers ──────────────────────────────
-  const dateObj = useMemo(() => new Date(selectedDate + 'T00:00:00'), [selectedDate]);
-  const dayOfWeek = dateObj.getDay(); // 0 is Sunday, 6 is Saturday
-  const isSaturday = dayOfWeek === 6;
-  const isSunday = dayOfWeek === 0;
-  const prevTradingDate = useMemo(() => getPreviousTradingDate(selectedDate), [selectedDate]);
-
-  // ─── Load previous day data for carry-forward (Friday for Sunday, else yesterday) ───
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        let doc = await dailyInventoryService.getByDate(prevTradingDate);
-        if (!doc?.data && isSunday) {
-          // If Friday wasn't logged, fallback to Saturday
-          doc = await dailyInventoryService.getByDate(shiftDate(selectedDate, -1));
-        }
-        if (!cancelled) {
-          setPrevDayData(doc?.data || null);
-        }
-      } catch (err) {
-        console.error('[Dashboard] prev day load error:', err);
+    setLoadError(null);
+    setPrevDayData(null);
+    setPosSummary(null);
+    setFormData(buildEmptyDayData());
+    loadStallDay(selectedDate, {
+      getDay: dailyInventoryService.getByDate,
+      getSales: salesOrderService.getDailySummary,
+      getInventory: dailyInventoryService.getOpeningInventory,
+    }).then(({ record, previous, sales, inventory, data }) => {
+      if (cancelled) return;
+      setFormData(data);
+      setPrevDayData(previous?.data || null);
+      setPosSummary(sales);
+      setOpeningInventory(inventory);
+      setNotes(record?.notes || '');
+      setStatus(record?.status || 'draft');
+      setStockReceivedSynced(!!(record?.stockReceivedSynced || record?.status === 'submitted'));
+      const whole = Number(data.raw_materials?.chicken_whole || 0);
+      const pieces = Number(data.raw_materials?.chicken_pcs || 0);
+      setChickenCutYield(whole > 0 && Math.round(pieces / whole) === 8 ? 8 : 9);
+    }).catch(err => {
+      if (!cancelled) setLoadError('Could not load opening stock: ' + err.message);
+    }).finally(() => {
+      if (!cancelled) {
+        setLoadedDate(selectedDate);
+        setLoading(false);
+        setPosLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedDate, prevTradingDate, isSunday]);
-
-  // ─── Auto-prefill brought_to_stall if draft & empty ────────────────────
-  useEffect(() => {
-    if (status !== 'submitted' && prevDayData && !loading) {
-      setFormData(prev => {
-        const brought = prev.brought_to_stall || {};
-        const isBroughtEmpty = (brought.chicken_pcs === 0 || brought.chicken_pcs == null) &&
-          (brought.carcass_pcs === 0 || brought.carcass_pcs == null);
-        if (isBroughtEmpty) {
-          const autoBrought = calculateBroughtToStall(prev.raw_materials, prevDayData?.remaining_unfried, isSaturday);
-          return {
-            ...prev,
-            brought_to_stall: {
-              ...brought,
-              chicken_pcs: autoBrought.chicken_pcs,
-              carcass_pcs: autoBrought.carcass_pcs,
-              chicken_neck_set: autoBrought.chicken_neck_set,
-            }
-          };
-        }
-        return prev;
-      });
-    }
-  }, [prevDayData, status, isSaturday, loading]);
-
-  // ─── Update a single product value (reactive Excel formulas) ───────────
-  const handleChange = useCallback((categoryKey, productKey, value) => {
-    setFormData(prev => {
-      const nextCategory = {
-        ...prev[categoryKey],
-        [productKey]: value,
-      };
-
-      const nextFormData = {
-        ...prev,
-        [categoryKey]: nextCategory,
-      };
-
-      // ── Updated Excel Flow Automations ──
-      if (categoryKey === 'raw_materials') {
-        const prevUnfriedChicken = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
-        const prevUnfriedCarcass = Number(prevDayData?.remaining_unfried?.carcass_pcs || 0);
-
-        // 1 WHOLE chicken is portioned into pieces (standard 9 pcs, optional 8 pcs):
-        if (productKey === 'chicken_whole') {
-          const wholeCount = Number(value) || 0;
-          const pieces = Math.round(wholeCount * (chickenCutYield || 9));
-          nextCategory.chicken_pcs = pieces;
-
-          // Auto-calculate brought_to_stall.chicken_pcs (yesterday unfried + today received):
-          if (!isSaturday) {
-            nextFormData.brought_to_stall = {
-              ...nextFormData.brought_to_stall,
-              chicken_pcs: prevUnfriedChicken + pieces,
-            };
-          }
-        } else if (productKey === 'chicken_pcs') {
-          const pieces = Number(value) || 0;
-          if (!isSaturday) {
-            nextFormData.brought_to_stall = {
-              ...nextFormData.brought_to_stall,
-              chicken_pcs: prevUnfriedChicken + pieces,
-            };
-          }
-        } else if (productKey === 'carcass_pcs') {
-          const pieces = Number(value) || 0;
-          if (!isSaturday) {
-            nextFormData.brought_to_stall = {
-              ...nextFormData.brought_to_stall,
-              carcass_pcs: prevUnfriedCarcass + pieces,
-            };
-          }
-        } else if (productKey === 'neck') {
-          const pieces = Number(value) || 0;
-          // Leher SET = ROUNDDOWN(PC / 4)
-          nextFormData.brought_to_stall = {
-            ...nextFormData.brought_to_stall,
-            chicken_neck_set: Math.floor(pieces / 4),
-          };
-        }
-      }
-
-      // Automatically keep remaining_unfried (raw carryover) and other_remaining in sync:
-      const autoRem = computeAutoRemainders(
-        nextFormData.brought_to_stall,
-        nextFormData.remaining_fried,
-        posSummary?.soldBreakdown || {}
-      );
-      nextFormData.remaining_unfried = autoRem.remaining_unfried;
-      nextFormData.other_remaining = autoRem.other_remaining;
-
-      return nextFormData;
     });
-  }, [prevDayData, isSaturday, chickenCutYield, posSummary]);
+    return () => { cancelled = true; };
+  }, [selectedDate, reloadKey]);
 
-  // ─── Toggle category accordion ──────────────────────────────────────────
+  // Refresh live dependencies before saving while retaining unsaved receipt inputs.
+  const refreshOpeningData = useCallback(async (data) => {
+    const [previous, inventory, sales] = await Promise.all([
+      dailyInventoryService.getByDate(prevTradingDate),
+      dailyInventoryService.getOpeningInventory(selectedDate),
+      salesOrderService.getDailySummary(selectedDate),
+    ]);
+    setPrevDayData(previous?.data || null);
+    setOpeningInventory(inventory);
+    setPosSummary(sales);
+    return reconcileStallOpening(data, previous?.data, inventory, selectedDate, sales?.soldBreakdown);
+  }, [selectedDate, prevTradingDate]);
+
+  // Every draft edit uses the same model as loading and saving.
+  const handleChange = useCallback((categoryKey, productKey, value) => {
+    if (loading || loadError || saving || stockSending) return;
+    setFormData(prev => {
+      const category = { ...prev[categoryKey], [productKey]: value };
+      if (categoryKey === 'raw_materials' && productKey === 'chicken_whole') {
+        category.chicken_pcs = Math.round((Number(value) || 0) * chickenCutYield);
+      }
+      const next = { ...prev, [categoryKey]: category };
+      return isSubmitted ? next : reconcileStallOpening(next, prevDayData, openingInventory, selectedDate, posSummary?.soldBreakdown);
+    });
+  }, [loading, loadError, saving, stockSending, chickenCutYield, isSubmitted, prevDayData, openingInventory, selectedDate, posSummary]);
+
   const toggleCategory = useCallback((catKey) => {
     setOpenCategories(prev => ({ ...prev, [catKey]: !prev[catKey] }));
   }, []);
 
-  // ─── Re-sync Brought to Stall with Excel formulas ───────────────────────
-  const handleRecalculateBrought = useCallback(() => {
-    setFormData(prev => {
-      const autoBrought = calculateBroughtToStall(
-        prev.raw_materials,
-        prevDayData?.remaining_unfried,
-        isSaturday
-      );
-      const newBrought = {
-        ...prev.brought_to_stall,
-        chicken_pcs: autoBrought.chicken_pcs,
-        carcass_pcs: autoBrought.carcass_pcs,
-        chicken_neck_set: autoBrought.chicken_neck_set,
-      };
-      const autoRem = computeAutoRemainders(
-        newBrought,
-        prev.remaining_fried,
-        posSummary?.soldBreakdown || {}
-      );
-      return {
-        ...prev,
-        brought_to_stall: newBrought,
-        remaining_unfried: autoRem.remaining_unfried,
-        other_remaining: autoRem.other_remaining,
-      };
-    });
-    setSaveMsg({ type: 'success', text: 'Brought to stall updated with Excel formulas!' });
-    setTimeout(() => setSaveMsg(null), 3000);
-  }, [prevDayData, isSaturday, posSummary]);
+  const handleRecalculateBrought = useCallback(async () => {
+    if (loading || loadError || isSubmitted || saving || stockSending) return;
+    setSaving(true);
+    try {
+      setFormData(await refreshOpeningData(formData));
+      setSaveMsg({ type: 'success', text: 'Carryover, received stock and POS remainders refreshed.' });
+    } catch (err) {
+      setSaveMsg({ type: 'error', text: 'Refresh failed: ' + err.message });
+    } finally { setSaving(false); }
+  }, [loading, loadError, isSubmitted, saving, stockSending, refreshOpeningData, formData]);
 
-  // ─── Mark Saturday Closed ────────────────────────────────────────────────
   const handleMarkSaturdayClosed = useCallback(() => {
-    setFormData(prev => ({
-      ...prev,
-      brought_to_stall: {
-        ...prev.brought_to_stall,
-        chicken_pcs: 0,
-        carcass_pcs: 0,
-        chicken_neck_set: 0,
-        mushroom: 0,
-        butter_rice: 0,
-        cheese_sauce: 0,
-        korean_sauce: 0,
-        green_sauce: 0,
-        bbq_sauce: 0,
-      }
-    }));
-    setNotes(prev => prev ? (prev.includes('Saturday') ? prev : prev + ' (Stall closed on Saturday)') : 'Stall closed on Saturday');
-    setSaveMsg({ type: 'success', text: 'Stall marked as closed for Saturday.' });
-    setTimeout(() => setSaveMsg(null), 3000);
-  }, []);
+    setFormData(prev => reconcileStallOpening(prev, prevDayData, openingInventory, selectedDate, posSummary?.soldBreakdown));
+    setNotes(prev => prev.includes('Saturday') ? prev : `${prev} (Stall closed on Saturday)`.trim());
+  }, [prevDayData, openingInventory, selectedDate, posSummary]);
 
-  // ─── Sync with previous day unfried ─────────────────────────────────────
-  const handleSyncPreviousDay = useCallback(() => {
-    handleRecalculateBrought();
-  }, [handleRecalculateBrought]);
+  const handleSyncPreviousDay = handleRecalculateBrought;
 
-  // ─── Change Chicken Cut Yield (9 pcs vs 8 pcs per whole chicken) ─────────
   const handleCutYieldChange = useCallback((newYield) => {
+    if (isSubmitted || loading || saving || stockSending) return;
     setChickenCutYield(newYield);
     setFormData(prev => {
-      const wholeCount = Number(prev?.raw_materials?.chicken_whole || 0);
-      if (wholeCount <= 0) return prev;
-      const pieces = Math.round(wholeCount * newYield);
-      const prevUnfriedChicken = Number(prevDayData?.remaining_unfried?.chicken_pcs || 0);
-      const newBrought = {
-        ...prev.brought_to_stall,
-        chicken_pcs: isSaturday ? (prev.brought_to_stall?.chicken_pcs || 0) : (prevUnfriedChicken + pieces),
-      };
-      const autoRem = computeAutoRemainders(
-        newBrought,
-        prev.remaining_fried,
-        posSummary?.soldBreakdown || {}
-      );
-      return {
-        ...prev,
-        raw_materials: {
-          ...prev.raw_materials,
-          chicken_pcs: pieces,
-        },
-        brought_to_stall: newBrought,
-        remaining_unfried: autoRem.remaining_unfried,
-        other_remaining: autoRem.other_remaining,
-      };
+      const whole = Number(prev.raw_materials?.chicken_whole || 0);
+      const next = whole > 0 ? { ...prev, raw_materials: { ...prev.raw_materials, chicken_pcs: Math.round(whole * newYield) } } : prev;
+      return reconcileStallOpening(next, prevDayData, openingInventory, selectedDate, posSummary?.soldBreakdown);
     });
-  }, [prevDayData, isSaturday, posSummary]);
+  }, [isSubmitted, loading, saving, stockSending, prevDayData, openingInventory, selectedDate, posSummary]);
 
-  // ─── Auto-fill Remainder from POS Orders ────────────────────────────────
-  const handleAutofillFromPos = useCallback(() => {
-    if (!posSummary) return;
-    const posSold = posSummary.soldBreakdown || {};
-    let autoRemResult = null;
-    setFormData(prev => {
-      const autoRem = computeAutoRemainders(
-        prev.brought_to_stall,
-        prev.remaining_fried,
-        posSold
-      );
-      autoRemResult = autoRem;
-      return {
-        ...prev,
-        remaining_unfried: autoRem.remaining_unfried,
-        other_remaining: autoRem.other_remaining,
-      };
-    });
-    const chickenUnf = autoRemResult?.remaining_unfried?.chicken_pcs ?? 0;
-    const carcassUnf = autoRemResult?.remaining_unfried?.carcass_pcs ?? 0;
-    setSaveMsg({
-      type: 'success',
-      text: `✓ Auto-filled from POS: ${chickenUnf} pcs chicken carryover, ${carcassUnf} carcass carryover, sauces & rice remainders updated!`
-    });
-    setTimeout(() => setSaveMsg(null), 5000);
-  }, [posSummary]);
+  const handleAutofillFromPos = handleRecalculateBrought;
 
   // ─── Re-apply a submitted day to inventory (reverses prior, applies again) ───
   const handleReapplyInventory = useCallback(async () => {
@@ -1505,6 +1290,7 @@ export default function StaffDashboardPage({ isMobile }) {
 
   // ─── Save as draft or final submit ──────────────────────────────────────
   const handleSave = useCallback(async (finalSubmit = false) => {
+    if (loading || loadError || saving || stockSending) return;
     if (isSubmitted) {
       setSaveMsg({ type: 'error', text: 'This day report has already been submitted and cannot be resubmitted.' });
       return;
@@ -1513,46 +1299,33 @@ export default function StaffDashboardPage({ isMobile }) {
     setSaveMsg(null);
     try {
       const staffName = profile?.name || profile?.username || 'Unknown';
-      const autoRem = computeAutoRemainders(
-        formData.brought_to_stall,
-        formData.remaining_fried,
-        posSummary?.soldBreakdown || {}
-      );
-      const dataToSave = {
-        ...formData,
-        remaining_unfried: autoRem.remaining_unfried,
-        other_remaining: autoRem.other_remaining,
-      };
+      const dataToSave = await refreshOpeningData(formData);
+      setFormData(dataToSave);
       await dailyInventoryService.save(
         selectedDate,
         dataToSave,
         staffName,
-        finalSubmit ? 'submitted' : 'draft',
+        'draft',
         notes,
       );
-      let syncResult = null;
-      let syncFailed = false;
-      if (finalSubmit) {
-        setStatus('submitted');
-        setStockReceivedSynced(true);
-        // Synchronize inventory stock with the daily dashboard entry:
-        try {
-          syncResult = await dailyInventoryService.syncInventoryFromDailyData(selectedDate, dataToSave);
-        } catch (syncErr) {
-          syncFailed = true;
-          console.error('[StaffDashboardPage] inventory sync failed:', syncErr);
-        }
-      }
       if (!finalSubmit) {
         setSaveMsg({ type: 'success', text: 'Draft saved!' });
-      } else if (syncFailed) {
-        setSaveMsg({ type: 'error', text: 'Submitted, but inventory update failed. Check console / permissions.' });
-      } else if (syncResult?.skipped) {
-        setSaveMsg({ type: 'success', text: 'Submitted. Inventory was already updated for this date.' });
       } else {
-        const n = syncResult?.updated?.length || 0;
-        const miss = syncResult?.unmatched?.length ? ` (no inventory item for: ${syncResult.unmatched.join(', ')})` : '';
-        setSaveMsg({ type: 'success', text: `Submitted & ${n} inventory movement(s) applied${miss}` });
+        // Receipts may have changed since the morning send. Apply their delta first.
+        const receiptResult = await dailyInventoryService.sendReceivedStockToInventory(selectedDate, dataToSave);
+        if (receiptResult.unmatched?.length) {
+          throw new Error(`Draft saved. Match these inventory items before submitting: ${receiptResult.unmatched.join(', ')}`);
+        }
+        const syncResult = await dailyInventoryService.syncInventoryFromDailyData(selectedDate, dataToSave);
+        if (syncResult.unmatched?.length) {
+          throw new Error(`Draft saved. Closing stock has unmatched inventory items: ${syncResult.unmatched.join(', ')}`);
+        }
+        await dailyInventoryService.submit(selectedDate);
+        setStatus('submitted');
+        setStockReceivedSynced(true);
+        setSaveMsg({ type: 'success', text: syncResult.skipped
+          ? 'Submitted. Closing stock was already applied for this date.'
+          : `Submitted and ${syncResult.updated.length} closing movement(s) applied.` });
       }
       setTimeout(() => setSaveMsg(null), 6000);
     } catch (err) {
@@ -1561,10 +1334,11 @@ export default function StaffDashboardPage({ isMobile }) {
     } finally {
       setSaving(false);
     }
-  }, [selectedDate, formData, notes, profile, isSubmitted, posSummary]);
+  }, [selectedDate, formData, notes, profile, isSubmitted, refreshOpeningData, loading, loadError, saving, stockSending]);
 
   // ─── Send Raw Materials & Brought Stock into Central Inventory ──────────
   const handleSendStockToInventory = useCallback(async () => {
+    if (loading || loadError || saving || stockSending) return;
     if (isSubmitted) {
       setSaveMsg({ type: 'error', text: 'This day report has already been submitted and locked.' });
       return;
@@ -1573,16 +1347,8 @@ export default function StaffDashboardPage({ isMobile }) {
     setSaveMsg(null);
     try {
       const staffName = profile?.name || profile?.username || 'Unknown';
-      const autoRem = computeAutoRemainders(
-        formData.brought_to_stall,
-        formData.remaining_fried,
-        posSummary?.soldBreakdown || {}
-      );
-      const dataToSave = {
-        ...formData,
-        remaining_unfried: autoRem.remaining_unfried,
-        other_remaining: autoRem.other_remaining,
-      };
+      const dataToSave = await refreshOpeningData(formData);
+      setFormData(dataToSave);
 
       // Save draft with current numbers first
       await dailyInventoryService.save(
@@ -1595,7 +1361,7 @@ export default function StaffDashboardPage({ isMobile }) {
 
       // Send received stock to products
       const result = await dailyInventoryService.sendReceivedStockToInventory(selectedDate, dataToSave);
-      setStockReceivedSynced(true);
+      setStockReceivedSynced(!result?.unmatched?.length);
       const n = result?.updated?.length || 0;
       const miss = result?.unmatched?.length ? ` (no inventory item for: ${result.unmatched.join(', ')})` : '';
       setSaveMsg({ type: 'success', text: `Stock sent to inventory! ${n} item(s) credited${miss}` });
@@ -1606,7 +1372,7 @@ export default function StaffDashboardPage({ isMobile }) {
     } finally {
       setStockSending(false);
     }
-  }, [selectedDate, formData, notes, profile, isSubmitted, posSummary]);
+  }, [selectedDate, formData, notes, profile, isSubmitted, refreshOpeningData, loading, loadError, saving, stockSending]);
 
   // ─── Summary computations ──────────────────────────────────────────────
   const summaryStats = useMemo(() => {
@@ -1933,6 +1699,7 @@ export default function StaffDashboardPage({ isMobile }) {
         }}>
           <button
             onClick={() => setSelectedDate(d => shiftDate(d, -1))}
+            disabled={saving || stockSending}
             className="btn btn-ghost btn-sm"
             style={{ padding: '6px 8px' }}
           >
@@ -1944,7 +1711,8 @@ export default function StaffDashboardPage({ isMobile }) {
             <input
               type="date"
               value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
+              onChange={e => { if (e.target.value) setSelectedDate(e.target.value); }}
+              disabled={saving || stockSending}
               max={todayStr()}
               style={{
                 border: 'none', background: 'transparent', fontFamily: 'var(--font)',
@@ -1958,7 +1726,7 @@ export default function StaffDashboardPage({ isMobile }) {
             onClick={() => { if (selectedDate < todayStr()) setSelectedDate(d => shiftDate(d, 1)); }}
             className="btn btn-ghost btn-sm"
             style={{ padding: '6px 8px', opacity: selectedDate >= todayStr() ? 0.3 : 1 }}
-            disabled={selectedDate >= todayStr()}
+            disabled={saving || stockSending || selectedDate >= todayStr()}
           >
             <ArrowRight size={16} />
           </button>
@@ -1966,6 +1734,7 @@ export default function StaffDashboardPage({ isMobile }) {
           {!isToday && (
             <button
               onClick={() => setSelectedDate(todayStr())}
+              disabled={saving || stockSending}
               className="btn btn-ghost btn-sm"
               style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}
             >
@@ -2072,6 +1841,11 @@ export default function StaffDashboardPage({ isMobile }) {
               <Loader size={24} style={{ animation: 'spin 1s linear infinite' }} />
               <div style={{ marginTop: 8, fontSize: 13 }}>Loading inventory data…</div>
             </div>
+          ) : loadError ? (
+            <div role="alert" className="card" style={{ padding: 20, color: '#b91c1c' }}>
+              {loadError}
+              <button type="button" className="btn btn-outline" onClick={() => setReloadKey(value => value + 1)} style={{ marginTop: 12 }}>Retry loading stock</button>
+            </div>
           ) : (
             <>
               {/* POS Live Connected Banner */}
@@ -2127,7 +1901,14 @@ export default function StaffDashboardPage({ isMobile }) {
                 </div>
               )}
 
-              {CATEGORIES.map(cat => (
+              {CATEGORIES.map(cat => cat.key === 'brought_to_stall' ? (
+                <StallOpeningSection key={cat.key} data={formData} previousDate={formData.opening_stock?.previousDate || prevTradingDate}
+                  hasPreviousDay={!!prevDayData} inventoryWarnings={openingInventory.warnings} isSaturday={isSaturday}
+                  isSubmitted={isSubmitted} isOpen={!!openCategories[cat.key]} onToggle={() => toggleCategory(cat.key)}
+                  onReceivedChange={(key, value) => handleChange('stock_received', key, value)}
+                  onRefresh={handleRecalculateBrought} onSend={handleSendStockToInventory}
+                  busy={saving || stockSending || loading} stockReceivedSynced={stockReceivedSynced} />
+              ) : (
                 <CategorySection
                   key={cat.key}
                   category={cat}
@@ -2149,6 +1930,7 @@ export default function StaffDashboardPage({ isMobile }) {
                   stockSending={stockSending}
                   friedPenalty={friedLeftoverPenalty}
                   chickenCutYield={chickenCutYield}
+                  busy={saving || stockSending}
                   onCutYieldChange={handleCutYieldChange}
                 />
               ))}
@@ -2182,7 +1964,7 @@ export default function StaffDashboardPage({ isMobile }) {
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
-                  disabled={isSubmitted}
+                  disabled={isSubmitted || saving || stockSending}
                   placeholder="Any special notes for today (e.g. weather impact, supplier issues, equipment problems…)"
                   rows={3}
                   className="inp"
@@ -2312,7 +2094,7 @@ export default function StaffDashboardPage({ isMobile }) {
             <RecentEntries
               entries={recentEntries}
               currentDate={selectedDate}
-              onSelect={setSelectedDate}
+              onSelect={date => { if (!saving && !stockSending) setSelectedDate(date); }}
               loading={recentLoading}
             />
           </div>

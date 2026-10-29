@@ -1,0 +1,40 @@
+.report-page { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.report-page h2,.report-page h3 { margin:0; }
+.report-page h2 { font-size:22px; }
+.report-page h3 { font-size:15px; }
+.report-header,.report-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.report-subtitle,.report-hint { font-size:12px; color:var(--text-3); line-height:1.6; margin:6px 0 0; }
+.report-actions,.report-controls,.report-tabs { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.report-actions .btn { font-size:12px; }
+.report-controls label,.report-cost-fields label { display:flex; flex-direction:column; gap:5px; font-size:12px; font-weight:600; }
+.report-controls input,.report-controls select,.report-cost-fields input { padding:8px 10px; border:1px solid var(--border); border-radius:7px; background:var(--card); color:var(--text-1); font:inherit; min-height:38px; max-width:100%; }
+.report-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.report-metric { padding:18px; min-width:0; }
+.report-label { font-size:11px; font-weight:600; color:var(--text-3); margin-bottom:9px; }
+.report-metric strong { display:block; font-size:clamp(20px,2vw,27px); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.report-metric small { display:block; font-size:11px; margin-top:8px; color:var(--text-3); line-height:1.5; }
+.report-highlight { background:#146748!important; color:white; }
+.report-highlight .report-label,.report-highlight small { color:#daede4; }
+.report-notice { border-left:3px solid #d49e40; background:#fff9ec; color:#705726; padding:12px 15px; font-size:12px; line-height:1.7; border-radius:4px; }
+.report-charts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.report-chart,.report-section { padding:18px; min-width:0; }
+.report-card-heading { margin-bottom:16px; }
+.report-section>p { font-size:12px; line-height:1.7; color:var(--text-2); }
+.report-section summary { cursor:pointer; font-weight:600; font-size:14px; }
+.report-table-wrap { overflow:auto; max-width:100%; margin-top:14px; }
+.report-table { min-width:940px; }
+.report-table td,.report-table th { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.report-table .report-status-cell { white-space:normal; min-width:180px; max-width:320px; font-size:11px; }
+.report-table tfoot { background:var(--bg); }
+.report-negative { color:#b91c1c; }
+.report-message,.report-empty { padding:28px 18px; color:var(--text-3); text-align:center; font-size:13px; }
+.report-pair { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.report-modal { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; padding:24px; display:flex; align-items:center; justify-content:center; }
+.report-dialog { width:min(100%,1000px); background:var(--card); padding:24px; border-radius:12px; max-height:90vh; overflow:auto; }
+.report-cost-fields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:16px 0; }
+.report-cost-fields input { width:100%; box-sizing:border-box; }
+.report-tabs button[aria-selected=true] { background:var(--green); color:white; border-color:var(--green); }
+.report-feedback { font-size:12px; margin:10px 0; }
+@media(max-width:1100px){ .report-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:700px){ .report-charts { grid-template-columns:1fr; } .report-cost-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } .report-metric { padding:14px; } .report-metric strong { font-size:20px; } .report-dialog { padding:14px; } .report-modal { padding:10px; } }
+@media print { .no-print,.report-tabs { display:none!important; } .report-page { color:#000; } .report-charts { grid-template-columns:1fr; } .report-chart { break-inside:avoid; } .report-table-wrap { overflow:visible; } .report-table { min-width:0; width:100%; font-size:9px; } .report-table td,.report-table th { white-space:normal; padding:5px; } .report-table .report-status-cell { min-width:0; } .report-metrics { grid-template-columns:repeat(2,1fr); } }

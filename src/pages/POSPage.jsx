@@ -4,6 +4,7 @@ import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, Tog
 import { useFirestore } from '../hooks/useFirestore';
 import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService, recipeService } from '../services/firestoreService';
 import { Modal } from '../components/Layout';
+import { getMalaysiaDate } from '../utils/dailyFlowCalculator';
 
 // ── Firestore doc → POS card shape ──────────────────────────────────────────
 const fromDoc = (d) => ({
@@ -123,7 +124,7 @@ export default function POSPage({ isMobile }) {
   const formatInvoiceNumber = (order) => {
     if (order.invoiceNumber) return order.invoiceNumber;
     const ts = order.createdAt?.toDate ? order.createdAt.toDate() : (order.createdAt ? new Date(order.createdAt) : new Date());
-    const ymd = ts.toISOString().slice(0, 10).replace(/-/g, '');
+    const ymd = getMalaysiaDate(ts).replace(/-/g, '');
     const suffix = (order.id || '').slice(-4).toUpperCase();
     return `INV-${ymd}-${suffix}`;
   };
@@ -187,11 +188,11 @@ export default function POSPage({ isMobile }) {
     try {
       // 1. Create the sales order (include recipe snapshot for reporting)
       const now = new Date();
-      const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const datePart = getMalaysiaDate(now).replace(/-/g, '');
       const randPart = Math.floor(1000 + Math.random() * 9000);
       const generatedInvoiceNumber = `INV-${datePart}-${randPart}`;
 
-      const dateStr = now.toISOString().slice(0, 10);
+      const dateStr = getMalaysiaDate(now);
 
       const orderId = await salesOrderService.create({
         invoiceNumber: generatedInvoiceNumber,

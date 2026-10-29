@@ -199,7 +199,7 @@ export function getMeatWeightCost(friedAndSold, pricePerKg = {}, dayData = null)
 // Applied every day, including closed days (sales = 0) — matches the Excel
 // business rule, surfaced explicitly rather than silently baked in.
 export const FIXED_DAILY_COSTS = {
-    royalty: 10,                                  // Excel CoS row 11: RM10 / day
+    royalty: 0,                                   // Removed by user instruction, 2026-10-28
     rent: Math.round((600 / 31) * 100) / 100,     // RM19.35
     utilities: 10,
     wifi: Math.round((68 / 2 / 31) * 100) / 100,  // RM1.10
@@ -251,9 +251,18 @@ export function getDailyCostOfSales(dayData, rawMaterialUnitCosts = {}, meatPric
  * Helper to shift a YYYY-MM-DD date string by a given number of days.
  */
 export function shiftDate(dateStr, days) {
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setDate(d.getDate() + days);
+    // Calendar dates must not move backwards when local midnight is converted to UTC.
+    const d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);
+}
+
+export function getMalaysiaDate(date = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(date);
+    const part = (type) => parts.find(p => p.type === type).value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 /**
@@ -264,8 +273,8 @@ export function shiftDate(dateStr, days) {
  * - Tuesday - Friday carries over from previous day (1 day prior).
  */
 export function getPreviousTradingDate(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    const dayOfWeek = d.getDay(); // 0 = Sunday, 6 = Saturday
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const dayOfWeek = d.getUTCDay(); // 0 = Sunday, 6 = Saturday
     if (dayOfWeek === 0) {
         // Sunday carries over from Friday (2 days ago)
         return shiftDate(dateStr, -2);
@@ -277,7 +286,7 @@ export function getPreviousTradingDate(dateStr) {
  * Calculate automated "Brought to Stall" (BAWA KE GERAI) quantities:
  * - Ayam (ketul): yesterday's (or Friday's if Sunday) unfried + today's received pieces
  * - Rangka (ketul): yesterday's unfried + today's received pieces
- * - Leher (set): ROUNDDOWN(neck pcs received / 4)
+ * - Leher (set): previous raw sets + ROUNDDOWN(neck pcs received / 4)
  * - Saturday is closed: returns 0 pieces
  */
 export function calculateBroughtToStall(rawMaterials = {}, prevTradingDayUnfried = {}, isSaturday = false) {
@@ -300,7 +309,7 @@ export function calculateBroughtToStall(rawMaterials = {}, prevTradingDayUnfried
     return {
         chicken_pcs: prevUnfriedChicken + rawChicken,
         carcass_pcs: prevUnfriedCarcass + rawCarcass,
-        chicken_neck_set: Math.floor(rawNeck / 4),
+        chicken_neck_set: n(prevTradingDayUnfried.neck) + Math.floor(rawNeck / 4),
     };
 }
 
