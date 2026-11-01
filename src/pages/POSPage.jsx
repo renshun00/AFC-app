@@ -2,9 +2,12 @@ import React, { useState, useMemo } from 'react';
 import { where, orderBy } from 'firebase/firestore';
 import { Plus, Minus, Trash2, Printer, ShoppingBag, Search, Tag, ToggleLeft, ToggleRight, Banknote, QrCode, CheckCircle, ImageOff, AlertTriangle, Receipt, FileText } from 'lucide-react';
 import { useFirestore } from '../hooks/useFirestore';
-import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService, recipeService } from '../services/firestoreService';
+import { productService, salesOrderService, paymentTransactionService, inventoryTransactionService, recipeService, convertToBaseUnit } from '../services/firestoreService';
 import { Modal } from '../components/Layout';
 import { getMalaysiaDate } from '../utils/dailyFlowCalculator';
+import { createPosAvailability } from '../utils/posAvailability.js';
+
+const { availableToAdd, remainingInventory } = createPosAvailability(convertToBaseUnit, recipeService.calculateAvailableQty);
 
 // ── Firestore doc → POS card shape ──────────────────────────────────────────
 const fromDoc = (d) => ({
@@ -116,6 +119,9 @@ export default function POSPage({ isMobile }) {
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [cart, setCart] = useState([]);
+  const remainingToAdd = Object.fromEntries(menuItems.map(item => [item.id, availableToAdd(item, cart, inventoryDocs)]));
+  const checkedCart = cart.map(line => ({ ...line, stock: menuItems.find(item => item.id === line.id)?.stock ?? 0 }));
+  const cartStockValid = remainingInventory(checkedCart, inventoryDocs).valid;
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -153,6 +159,7 @@ export default function POSPage({ isMobile }) {
 
   const addItem = (item) => {
     setCart(c => {
+      if (availableToAdd(item, c, inventoryDocs) <= 0) return c;
       const ex = c.find(x => x.id === item.id);
       if (ex) return c.map(x => x.id === item.id ? { ...x, qty: x.qty + 1 } : x);
       return [...c, { ...item, qty: 1 }];
@@ -160,7 +167,11 @@ export default function POSPage({ isMobile }) {
   };
 
   const changeQty = (id, delta) => {
-    setCart(c => c.map(x => x.id === id ? { ...x, qty: Math.max(0, x.qty + delta) } : x).filter(x => x.qty > 0));
+    setCart(c => {
+      const item = menuItems.find(x => x.id === id) || c.find(x => x.id === id);
+      if (delta > 0 && (!item || availableToAdd(item, c, inventoryDocs) <= 0)) return c;
+      return c.map(x => x.id === id ? { ...x, qty: Math.max(0, x.qty + delta) } : x).filter(x => x.qty > 0);
+    });
   };
 
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -184,6 +195,11 @@ export default function POSPage({ isMobile }) {
   // ── Submit order to Firestore ───────────────────────────────────────────
   const confirmOrder = async () => {
     if (!cart.length) return;
+    if (!cartStockValid) {
+      alert('The cart exceeds available stock. Reduce the quantity before saving this order.');
+      resetPayment();
+      return;
+    }
     setSaving(true);
     try {
       // 1. Create the sales order (include recipe snapshot for reporting)
@@ -225,6 +241,7 @@ export default function POSPage({ isMobile }) {
       });
 
       // 3. Deduct stock — recipe-aware ingredient deduction
+      const stockSnapshot = inventoryDocs.map(item => ({ ...item }));
       for (const item of cart) {
         const liveProd = productDocs.find(p => p.id === item.id);
         const itemRecipe = (item.recipe && item.recipe.length > 0) ? item.recipe : (liveProd?.recipe || []);
@@ -234,7 +251,7 @@ export default function POSPage({ isMobile }) {
             itemRecipe,
             item.qty,
             orderId,
-            inventoryDocs,
+            stockSnapshot,
           );
         } else {
           // No recipe: fall back to simple stock deduction on the menu item
@@ -310,18 +327,20 @@ export default function POSPage({ isMobile }) {
                 const inCart = cart.find(x => x.id === item.id);
                 const availQty = availableQtyMap[item.id] ?? item.stock;
                 const isOutOfStock = availQty <= 0;
+                const isAtLimit = remainingToAdd[item.id] <= 0;
+                const cannotAdd = isOutOfStock || isAtLimit;
                 const isLowStock = availQty > 0 && availQty <= 5;
                 return (
-                  <div key={item.id} onClick={() => { if (!isOutOfStock) addItem(item); }}
+                  <div key={item.id} onClick={() => { if (!cannotAdd) addItem(item); }}
                     style={{
-                      background: isOutOfStock ? '#f9f9f9' : inCart ? 'var(--primary-light)' : '#fafafa',
+                      background: cannotAdd ? '#f9f9f9' : inCart ? 'var(--primary-light)' : '#fafafa',
                       border: `1.5px solid ${isOutOfStock ? '#e5e5e5' : inCart ? 'var(--primary)' : 'var(--border)'}`,
                       borderRadius: 'var(--radius)', padding: '10px 10px 12px',
-                      cursor: isOutOfStock ? 'not-allowed' : 'pointer',
+                      cursor: cannotAdd ? 'not-allowed' : 'pointer',
                       transition: 'all .12s', position: 'relative',
-                      opacity: isOutOfStock ? 0.5 : 1,
+                      opacity: cannotAdd ? 0.5 : 1,
                     }}
-                    onMouseEnter={e => { if (!isOutOfStock) e.currentTarget.style.boxShadow = 'var(--shadow)'; }}
+                    onMouseEnter={e => { if (!cannotAdd) e.currentTarget.style.boxShadow = 'var(--shadow)'; }}
                     onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
                   >
                     {/* Out of stock overlay */}
@@ -350,7 +369,7 @@ export default function POSPage({ isMobile }) {
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
                     }}>
                       {isLowStock && <AlertTriangle size={10} />}
-                      {isOutOfStock ? 'Out of Stock' : `Available: ${availQty === Infinity ? '∞' : availQty}`}
+                      {isOutOfStock ? 'Out of Stock' : `Available: ${availQty === Infinity ? '∞' : availQty}${isAtLimit ? ' · Max in cart' : ''}`}
                     </div>
 
                     {inCart && (
@@ -450,7 +469,7 @@ export default function POSPage({ isMobile }) {
                   <Minus size={11} />
                 </button>
                 <span style={{ fontSize: 13, fontWeight: 700, minWidth: 16, textAlign: 'center' }}>{item.qty}</span>
-                <button onClick={() => changeQty(item.id, 1)} style={{ width: 24, height: 24, borderRadius: '50%', border: '1.5px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                <button onClick={() => changeQty(item.id, 1)} disabled={remainingToAdd[item.id] <= 0} aria-label={`Add one ${item.name}`} style={{ width: 24, height: 24, borderRadius: '50%', border: '1.5px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: remainingToAdd[item.id] <= 0 ? 'not-allowed' : 'pointer', opacity: remainingToAdd[item.id] <= 0 ? 0.4 : 1 }}>
                   <Plus size={11} />
                 </button>
                 <button onClick={() => setCart(c => c.filter(x => x.id !== item.id))} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'var(--red-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginLeft: 2 }}>
@@ -461,7 +480,9 @@ export default function POSPage({ isMobile }) {
           ))}
         </div>
 
-        {/* Totals + Discount */}
+          {!cartStockValid && <p role="alert" style={{ margin: '8px 16px', color: '#dc2626', fontSize: 12 }}>Cart quantity exceeds current stock. Reduce it before checkout.</p>}
+
+          {/* Totals + Discount */}
         <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px' }}>
           {/* Discount toggle */}
           <div style={{
@@ -527,12 +548,12 @@ export default function POSPage({ isMobile }) {
             <button className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => { setCart([]); setDiscountEnabled(false); setDiscountValue(''); }}>Clear</button>
             <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }}
-              onClick={() => { if (cart.length) setPayStep('method'); }} disabled={saving}>
+              onClick={() => { if (cart.length && cartStockValid) setPayStep('method'); }} disabled={saving || !cart.length || !cartStockValid}>
               {saving ? 'Processing…' : `Pay RM${grandTotal.toFixed(2)}`}
             </button>
           </div>
           <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 12 }}
-            onClick={confirmOrder} disabled={saving}>
+            onClick={confirmOrder} disabled={saving || !cart.length || !cartStockValid}>
             + Save as New Order
           </button>
         </div>

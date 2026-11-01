@@ -1108,6 +1108,7 @@ export const recipeService = {
       const rounded = Math.round(newStock * 1000000) / 1000000;
 
       await patch('products', ingredient.inventoryItemId, { stock: rounded });
+      prodDoc.stock = rounded;
       await insert('inventory_transactions', {
         productId: ingredient.inventoryItemId,
         type: 'PRODUCTION',

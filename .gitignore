@@ -48,6 +48,8 @@ Thumbs.db
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
 *.local
+.local-tools/
+reset-test-data.cmd
 excel_analysis.md
 UNIFIED_APP_FLOW_PLAN.md
 DEVELOPER_HANDOVER_GUIDE.md

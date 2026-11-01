@@ -28,6 +28,8 @@ import {
 } from '../utils/dailyFlowCalculator';
 import { auth } from '../firebase';
 import StallOpeningSection from '../components/StallOpeningSection';
+import CashClosingSection from '../components/CashClosingSection';
+import { useCashClosing } from '../hooks/useCashClosing';
 import { loadStallDay, reconcileStallOpening } from '../utils/stallOpening.js';
 import { signInWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 
@@ -970,6 +972,7 @@ export default function StaffDashboardPage({ isMobile }) {
   const { profile } = useAuth();
   const isAdminUser = profile?.role === 'Admin';
   const [selectedDate, setSelectedDate] = useState(todayStr());
+  const cash = useCashClosing(selectedDate, profile?.name || profile?.username);
   const [formData, setFormData] = useState(buildEmptyDayData());
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('draft');       // 'draft' | 'submitted'
@@ -1088,13 +1091,8 @@ export default function StaffDashboardPage({ isMobile }) {
 
         setAttendanceMsg({ type: 'success', text: `Checked in successfully at ${timeStr}!` });
       } else if (attendanceModal === 'checkOut') {
-        if (activeShift?.id) {
-          await staffShiftService.clockOut(activeShift.id);
-        } else {
-          // If no open shift doc was tracked, clock in & immediately close
-          const newId = await staffShiftService.clockIn(profile.id, profile.outletId || 'outlet-1');
-          await staffShiftService.clockOut(newId);
-        }
+        if (!activeShift?.id) throw new Error('No active shift found. Refresh your attendance.');
+        await cash.save(activeShift.id);
 
         // Also update staff profile's checkOut
         await staffService.update(profile.id, { checkOut: timeStr });
@@ -1300,6 +1298,7 @@ export default function StaffDashboardPage({ isMobile }) {
     try {
       const staffName = profile?.name || profile?.username || 'Unknown';
       const dataToSave = await refreshOpeningData(formData);
+      if (finalSubmit || String(cash.amount).trim() !== '') await cash.save();
       setFormData(dataToSave);
       await dailyInventoryService.save(
         selectedDate,
@@ -1334,7 +1333,7 @@ export default function StaffDashboardPage({ isMobile }) {
     } finally {
       setSaving(false);
     }
-  }, [selectedDate, formData, notes, profile, isSubmitted, refreshOpeningData, loading, loadError, saving, stockSending]);
+  }, [selectedDate, formData, notes, profile, isSubmitted, refreshOpeningData, loading, loadError, saving, stockSending, cash]);
 
   // ─── Send Raw Materials & Brought Stock into Central Inventory ──────────
   const handleSendStockToInventory = useCallback(async () => {
@@ -1496,6 +1495,7 @@ export default function StaffDashboardPage({ isMobile }) {
               disabled={!isShiftOpen || shiftLoading}
               onClick={() => {
                 setAttendanceModal('checkOut');
+                if (activeShift?.clockIn) setSelectedDate(getMalaysiaDate(activeShift.clockIn.toDate ? activeShift.clockIn.toDate() : new Date(activeShift.clockIn)));
                 setVerifyPassword('');
                 setVerifyError('');
                 setShowVerifyPassword(false);
@@ -1556,8 +1556,9 @@ export default function StaffDashboardPage({ isMobile }) {
             borderRadius: 14,
             width: '100%',
             maxWidth: 420,
+            maxHeight: 'calc(100dvh - 32px)',
+            overflowY: 'auto',
             boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-            overflow: 'hidden',
           }}>
             {/* Modal Header */}
             <div style={{
@@ -1595,6 +1596,7 @@ export default function StaffDashboardPage({ isMobile }) {
 
             {/* Modal Body */}
             <form onSubmit={handleConfirmAttendance} style={{ padding: '20px' }}>
+              {attendanceModal === 'checkOut' && <CashClosingSection cash={cash} disabled={verifying} showSave={false} />}
               <div style={{
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0',
@@ -1951,6 +1953,9 @@ export default function StaffDashboardPage({ isMobile }) {
                 onAutofillFromPos={handleAutofillFromPos}
                 isSubmitted={isSubmitted}
               />
+
+              {/* Closing cash count */}
+              <CashClosingSection cash={cash} disabled={saving || stockSending || verifying} />
 
               {/* Notes */}
               <div style={{

@@ -5,6 +5,7 @@ import { useMalaysiaToday, useReporting } from '../hooks/useReporting';
 import { shiftDate } from '../utils/dailyFlowCalculator.js';
 import LockedAccountsPanel from '../components/LockedAccountsPanel';
 import ReportingCostEditor from '../components/ReportingCostEditor';
+import CashDiscrepancyAlerts from '../components/CashDiscrepancyAlerts';
 import { ReportActions, ReportingStatus, Metric, CoverageNotice, ReportCharts, rm, number } from '../components/ReportingViews';
 
 export default function AdminDashboardPage({ navigate }) {
@@ -12,6 +13,8 @@ export default function AdminDashboardPage({ navigate }) {
   const { report, sources, loading, error, refresh } = useReporting(shiftDate(today, -6), today);
   const inventory = useFirestore('products', where('isInventoryItem', '==', true));
   const current = report?.daily.find(d => d.date === today);
+  const overheadOnly = current && !current.active && current.extraExpenses === 0;
+  const estimatedNetGain = overheadOnly ? 0 : current?.netGain;
   const previous = report?.daily.find(d => d.date === shiftDate(today, -1));
   const change = previous?.revenue ? `${((current.revenue - previous.revenue) / previous.revenue * 100).toFixed(1)}% vs yesterday` : 'Completed POS orders';
   const products = inventory.data.filter(p => p.isActive !== false && !p.isArchived);
@@ -22,7 +25,8 @@ export default function AdminDashboardPage({ navigate }) {
     <div className="report-header"><div><h2>Today at AFC</h2><p className="report-subtitle">{today} · Malaysia trading date · Live operating overview</p></div><ReportActions report={report} refresh={refresh} compact /></div>
     <div className="report-actions no-print">{[['pos', 'Open POS'], ['daily', 'Daily closing'], ['staff', 'Review payroll'], ['reports', 'View reports'], ['inventory', 'Inventory']].map(([page, label]) => <button className="btn btn-outline" key={page} onClick={() => navigate?.(page)}>{label}</button>)}</div>
     <ReportingStatus loading={loading} error={error} retry={refresh} />
-    {current && <><div className="report-metrics"><Metric label="Today's POS sales" value={rm(current.revenue)} note={change} /><Metric label="Estimated CoS" value={rm(current.costOfSales)} note="Includes fried waste" /><Metric label="StaffCosts" value={rm(current.staffCosts)} note="Gross wages + management" /><Metric label="Estimated net gain" value={rm(current.netGain)} highlight note={current.margin == null ? 'Closing and payroll must be complete' : `${current.margin.toFixed(1)}% margin`} /></div>
+    <CashDiscrepancyAlerts navigate={navigate} />
+    {current && <><div className="report-metrics"><Metric label="Today's POS sales" value={rm(current.revenue)} note={change} /><Metric label="Estimated CoS" value={rm(current.costOfSales)} note="Includes fried waste" /><Metric label="StaffCosts" value={rm(current.staffCosts)} note="Gross wages + management" /><Metric label="Estimated net gain" value={rm(estimatedNetGain)} highlight note={overheadOnly ? 'No trading records yet; fixed costs remain in Reports' : current.margin == null ? 'Closing and payroll must be complete' : `${current.margin.toFixed(1)}% margin`} /></div>
       <div className="report-charts"><section className="card report-section"><h3>Today's reconciliation</h3>
         <div className="report-pair"><span>Completed orders</span><strong>{current.count}</strong></div>
         <div className="report-pair"><span>Daily closing</span><strong>{current.closingStatus === 'submitted' ? 'Submitted' : current.closingStatus === 'draft' ? 'Draft' : 'Not submitted'}</strong></div>
