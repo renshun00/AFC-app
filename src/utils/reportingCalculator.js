@@ -140,6 +140,7 @@ export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], 
     const issues = [...sales.issues];
     if (active && report?.status !== 'submitted') issues.push(report ? 'Closing report is a draft' : 'Closing report missing');
     if (active && !payrollDay && !legacy.length) issues.push('Payroll not saved');
+    if (payrollDay?.calculationStatus === 'pending') issues.push(...(payrollDay.pendingIssues || ['Payroll calculation pending']));
     if (active && !sales.count && SOLD_ITEMS.some(item => {
       const key = item.key === 'neck' ? 'chicken_neck_set' : item.key;
       const remaining = report?.data?.remaining_unfried?.[item.key] ?? report?.data?.other_remaining?.[item.key];

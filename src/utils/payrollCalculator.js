@@ -299,6 +299,7 @@ export function calculateStaffCosts(date, entries, rates = DEFAULT_PAYROLL_RATES
 export function summarizeMonthlyPayroll(records, month) {
   const staff = new Map();
   const dates = new Set();
+  const pendingDates = new Set();
   let correctedRecords = 0;
   let managementCorrections = 0;
   const managementByDate = new Map();
@@ -309,6 +310,7 @@ export function summarizeMonthlyPayroll(records, month) {
     if (entry.mealCorrectionApplied) correctedRecords++;
     if (entry.managementReclassified > 0) managementCorrections++;
     dates.add(record.date);
+    if (record.calculationStatus === 'pending') pendingDates.add(record.date);
     if (!managementByDate.has(record.date)) managementByDate.set(record.date, record.managementFeeForDay ?? calculateStaffCosts(record.date, [], record.rates || DEFAULT_PAYROLL_RATES).managementFee);
     const total = staff.get(record.staffId) || { staffId: record.staffId, staffName: record.staffName || 'Staff', days: 0, grossPay: 0, mealAdvance: 0, cashAdvance: 0, friedDeduction: 0 };
     total.days++;
@@ -322,5 +324,5 @@ export function summarizeMonthlyPayroll(records, month) {
   }).sort((a, b) => a.staffName.localeCompare(b.staffName));
   const totals = Object.fromEntries(['grossPay', 'mealAdvance', 'cashAdvance', 'friedDeduction', 'deductions', 'totalPay', 'excessAdvance'].map(key => [key, money(entries.reduce((sum, e) => sum + e[key], 0))]));
   const managementFee = money([...managementByDate.values()].reduce((sum, fee) => sum + nonnegative(fee), 0));
-  return { month, entries, dates: [...dates].sort(), correctedRecords, managementCorrections, managementFee, totalStaffCosts: money(totals.grossPay + managementFee), ...totals };
+  return { month, entries, dates: [...dates].sort(), pendingDates: [...pendingDates].sort(), correctedRecords, managementCorrections, managementFee, totalStaffCosts: money(totals.grossPay + managementFee), ...totals };
 }

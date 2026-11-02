@@ -55,8 +55,8 @@ UNIFIED_APP_FLOW_PLAN.md
 DEVELOPER_HANDOVER_GUIDE.md
 APP_FLOW_MEMORY.md
 AGENTS.md
-
-
+tests
+test/
 
 # ── Spreadsheets ─────────────────────────────────────────────────────────────
 *.xlsx

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Package, Truck, Flame, PackageOpen, MoreHorizontal,
   CalendarDays, Save, Send, ChevronDown, ChevronRight,
@@ -636,10 +636,9 @@ function DailyReconciliationPanel({ formData, isMobile, posSummary, onAutofillFr
           }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Info size={13} color="var(--primary)" />
-              Non-fried goods (Butter Rice & Sauces) auto-deducted via POS sales:
+              Sauces auto-deducted via POS sales:
             </span>
             <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>
-              Nasi: {brought.butter_rice || 0} brought − {posSold.butter_rice || 0} sold = {Math.max(0, Number(brought.butter_rice || 0) - Number(posSold.butter_rice || 0))} remain &nbsp;|&nbsp;
               Sauces: {(Number(brought.cheese_sauce || 0) + Number(brought.korean_sauce || 0) + Number(brought.green_sauce || 0) + Number(brought.bbq_sauce || 0))} brought − {(Number(posSold.cheese_sauce || 0) + Number(posSold.korean_sauce || 0) + Number(posSold.green_sauce || 0) + Number(posSold.bbq_sauce || 0))} sold = {
                 Math.max(0, Number(brought.cheese_sauce || 0) - Number(posSold.cheese_sauce || 0)) +
                 Math.max(0, Number(brought.korean_sauce || 0) - Number(posSold.korean_sauce || 0)) +
@@ -716,7 +715,7 @@ function AutoRemaindersSection({ formData, posSummary, onAutofillFromPos, isSubm
             )}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-            Unsold raw pieces carry over to tomorrow's Brought to Stall; unsold sauces & rice remain in stall.
+            Unsold raw pieces carry over to tomorrow's Brought to Stall; unsold sauces remain in stall.
           </div>
         </div>
         <div style={{ color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
@@ -734,7 +733,7 @@ function AutoRemaindersSection({ formData, posSummary, onAutofillFromPos, isSubm
             <div style={{ fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Info size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
               <span>
-                <strong>Automated End-of-Day Remainders:</strong> Deducted live via POS sales. No manual counting needed for raw carryover, rice, or sauces.
+                <strong>Automated End-of-Day Remainders:</strong> Deducted live via POS sales. No manual counting needed for raw carryover or sauces.
               </span>
             </div>
             {!isSubmitted && (
@@ -826,19 +825,6 @@ function AutoRemaindersSection({ formData, posSummary, onAutofillFromPos, isSubm
               <span>🍚 Non-Fried Inventory (Remaining in Stall)</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-              {/* Butter Rice */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Butter Rice</span>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: '#2563eb' }}>
-                    {otherRem.butter_rice ?? 0} <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)' }}>set</span>
-                  </span>
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
-                  {brought.butter_rice || 0} brought − {posSold.butter_rice || 0} sold
-                </div>
-              </div>
-
               {/* Cheese Sauce */}
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1000,6 +986,7 @@ export default function StaffDashboardPage({ isMobile }) {
   // ─── Attendance / Shift State ──────────────────────────────────────────
   const [activeShift, setActiveShift] = useState(null);
   const [shiftLoading, setShiftLoading] = useState(true);
+  const shiftLoadId = useRef(0);
   const [attendanceModal, setAttendanceModal] = useState(null); // 'checkIn' | 'checkOut' | null
   const [verifyPassword, setVerifyPassword] = useState('');
   const [showVerifyPassword, setShowVerifyPassword] = useState(false);
@@ -1009,6 +996,7 @@ export default function StaffDashboardPage({ isMobile }) {
 
   // Load staff member's shift for today
   const loadStaffShift = useCallback(async () => {
+    const requestId = ++shiftLoadId.current;
     if (!profile?.id || isAdminUser) {
       setShiftLoading(false);
       return;
@@ -1017,17 +1005,18 @@ export default function StaffDashboardPage({ isMobile }) {
       setShiftLoading(true);
       // First check if there is an active open shift
       const active = await staffShiftService.getActiveShift(profile.id);
+      if (requestId !== shiftLoadId.current) return;
       if (active) {
         setActiveShift(active);
       } else {
         // Check if there is already a completed or past shift today
         const todayShift = await staffShiftService.getTodayShift(profile.id);
-        setActiveShift(todayShift);
+        if (requestId === shiftLoadId.current) setActiveShift(todayShift);
       }
     } catch (err) {
-      console.warn('[StaffDashboardPage] error loading shift:', err);
+      if (requestId === shiftLoadId.current) console.warn('[StaffDashboardPage] error loading shift:', err);
     } finally {
-      setShiftLoading(false);
+      if (requestId === shiftLoadId.current) setShiftLoading(false);
     }
   }, [profile?.id]);
 
@@ -1085,29 +1074,42 @@ export default function StaffDashboardPage({ isMobile }) {
 
       if (attendanceModal === 'checkIn') {
         const shiftId = await staffShiftService.clockIn(profile.id, profile.outletId || 'outlet-1');
+        ++shiftLoadId.current;
+        setActiveShift({ id: shiftId, staffId: profile.id, clockIn: { toDate: () => now }, clockOut: null });
 
         // Also update staff profile's checkIn
-        await staffService.update(profile.id, { checkIn: timeStr });
+        try {
+          await staffService.update(profile.id, { checkIn: timeStr });
+        } catch (profileError) {
+          console.warn('[Attendance] shift saved, profile check-in display did not sync:', profileError);
+        }
 
         setAttendanceMsg({ type: 'success', text: `Checked in successfully at ${timeStr}!` });
       } else if (attendanceModal === 'checkOut') {
         if (!activeShift?.id) throw new Error('No active shift found. Refresh your attendance.');
         await cash.save(activeShift.id);
+        ++shiftLoadId.current;
+        setActiveShift(current => current?.id === activeShift.id
+          ? { ...current, clockOut: { toDate: () => now } }
+          : current);
 
         // Also update staff profile's checkOut
-        await staffService.update(profile.id, { checkOut: timeStr });
+        try {
+          await staffService.update(profile.id, { checkOut: timeStr });
+        } catch (profileError) {
+          console.warn('[Attendance] shift saved, profile check-out display did not sync:', profileError);
+        }
 
         setAttendanceMsg({ type: 'success', text: `Checked out successfully at ${timeStr}!` });
       }
-
-      // Refresh shift data
-      await loadStaffShift();
 
       // Reset modal state
       setAttendanceModal(null);
       setVerifyPassword('');
       setShowVerifyPassword(false);
       setTimeout(() => setAttendanceMsg(null), 5000);
+      // Confirm server state after the banner and buttons have updated.
+      void loadStaffShift();
     } catch (err) {
       console.error('[Attendance] error:', err);
       setVerifyError('Failed to process: ' + (err.message || 'Unknown error'));
@@ -1444,7 +1446,7 @@ export default function StaffDashboardPage({ isMobile }) {
                 background: isShiftOpen ? '#dcfce7' : '#f4f4f5',
                 color: isShiftOpen ? '#15803d' : '#71717a'
               }}>
-                {isShiftOpen ? '● On Duty' : '○ Not Clocked In'}
+                {isShiftOpen ? '● On Duty' : activeShift?.clockOut ? '✓ Checked Out' : '○ Not Clocked In'}
               </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -1881,7 +1883,7 @@ export default function StaffDashboardPage({ isMobile }) {
                         </span>
                       </div>
                       <div style={{ fontSize: 11, color: '#1e3a8a', marginTop: 2 }}>
-                        {posSummary.soldBreakdown?.chicken_pcs || 0} chicken pcs sold · {posSummary.soldBreakdown?.carcass_pcs || 0} carcass · {posSummary.soldBreakdown?.butter_rice || 0} rice sets · Deducted from live inventory
+                        {posSummary.soldBreakdown?.chicken_pcs || 0} chicken pcs sold · {posSummary.soldBreakdown?.carcass_pcs || 0} carcass · Deducted from live inventory
                       </div>
                     </div>
                   </div>
@@ -1914,7 +1916,7 @@ export default function StaffDashboardPage({ isMobile }) {
                 <CategorySection
                   key={cat.key}
                   category={cat}
-                  products={CATEGORY_PRODUCTS[cat.key].filter(p => isAdminUser || !p.adminOnly)}
+                  products={CATEGORY_PRODUCTS[cat.key].filter(p => p.key !== 'butter_rice' && (isAdminUser || !p.adminOnly))}
                   values={formData[cat.key] || {}}
                   onChange={(prodKey, val) => handleChange(cat.key, prodKey, val)}
                   isOpen={!!openCategories[cat.key]}

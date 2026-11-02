@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useWindowSize } from './hooks/useWindowSize';
 import { Sidebar, TopBar } from './components/Layout';
 import PWAInstallBanner from './components/PWAInstallBanner';
+import PayrollAutomation from './components/PayrollAutomation';
 import { useAuth } from './context/AuthContext';
 
 import AuthPage from './pages/AuthPage';
@@ -116,6 +117,7 @@ export default function App() {
             userName={profile.name || profile.username}
             userRole={userRole}
           />
+          <PayrollAutomation userId={firebaseUser.uid} />
           {renderPage()}
         </main>
       </div>

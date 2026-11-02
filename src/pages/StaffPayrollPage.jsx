@@ -4,9 +4,10 @@ import { Modal } from '../components/Layout';
 import MonthlyPayrollSummary from '../components/MonthlyPayrollSummary';
 import { useAuth } from '../context/AuthContext';
 import { staffService } from '../services/firestoreService';
-import { loadPayrollDay, savePayrollDay, savePayrollRates } from '../services/payrollService';
+import { loadPayrollDay, savePayrollAdjustments, savePayrollRates, subscribePayrollDay } from '../services/payrollService';
+import { calculateAutomaticPayroll } from '../utils/automaticPayroll';
 import { getMalaysiaDate } from '../utils/dailyFlowCalculator';
-import { DUTIES, DEFAULT_PAYROLL_RATES, calculateDailyPayroll, calculateStaffCosts, dutiesFromProfile, payrollIssues, validateRates } from '../utils/payrollCalculator';
+import { DUTIES, DEFAULT_PAYROLL_RATES, calculateStaffCosts, dutiesFromProfile, validateRates } from '../utils/payrollCalculator';
 
 const rm = value => `RM${Number(value || 0).toFixed(2)}`;
 const panel = { padding: 16, marginBottom: 14 };
@@ -32,7 +33,7 @@ function RatesEditor({ initial, busy, onSave, onClose }) {
   const [rates, setRates] = useState(() => structuredClone(initial));
   const [error, setError] = useState('');
   return <Modal title="Payroll rates" onClose={busy ? () => {} : onClose} maxWidth={760}>
-    <p style={small}>These defaults apply to new calculations. Saved payroll keeps its own rates until you explicitly recalculate that date.</p>
+    <p style={small}>These rates apply to days first calculated after this change. Existing days retain their saved rates.</p>
     <div style={{ ...row, alignItems: 'end', margin: '14px 0' }}>
       {Object.entries(RATE_FIELDS).map(([key, label]) => <NumericField key={key} label={label} value={rates[key]} disabled={busy}
         onChange={value => setRates(r => ({ ...r, [key]: value }))} />)}
@@ -64,29 +65,26 @@ export default function StaffPayrollPage({ isMobile }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
   const [staffEditor, setStaffEditor] = useState(null);
   const [staffError, setStaffError] = useState('');
   const [credentials, setCredentials] = useState(null);
   const request = useRef(0);
+  const adjustmentBaseline = useRef(null);
+  const latestSavedDay = useRef(null);
 
-  const load = async (target, refresh = false, retain = false) => {
+  const load = async target => {
     const token = ++request.current;
     setLoading(true); setError(''); setNotice('');
     try {
-      const next = await loadPayrollDay(target, refresh);
+      const next = await loadPayrollDay(target);
       if (token !== request.current) return;
-      setState(previous => {
-        if (retain && previous?.day.date === target && !previous.saved) {
-          next.day.managementFeeApplied = previous.day.managementFeeApplied;
-          next.day.entries = next.day.entries.map(entry => {
-            const old = previous.day.entries.find(e => e.staffId === entry.staffId);
-            return old ? { ...entry, duties: old.duties, bonus: old.bonus, cashAdvance: old.cashAdvance, mealClaims: old.mealClaims, note: old.note } : entry;
-          });
-        }
-        return next;
-      });
-      setDirty(retain);
+      if (latestSavedDay.current?.date === target && latestSavedDay.current.revision >= next.day.revision) {
+        next.day = latestSavedDay.current; next.saved = true;
+      }
+      setState(previous => previous?.day.date === target && previous.day.revision > next.day.revision ? previous : next);
+      setDirty(false);
     } catch (e) { if (token === request.current) { setState(null); setError(e.message); } }
     finally { if (token === request.current) setLoading(false); }
   };
@@ -95,6 +93,15 @@ export default function StaffPayrollPage({ isMobile }) {
     if (isAdmin) load(date);
     return () => { request.current++; };
   }, [date, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || editing) return undefined;
+    return subscribePayrollDay(date, saved => {
+      latestSavedDay.current = saved;
+      if (saved) setState(previous => previous?.day.date === date
+        ? { ...previous, saved: true, day: saved } : previous);
+    }, failure => setError(failure.message));
+  }, [date, isAdmin, editing]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -106,9 +113,10 @@ export default function StaffPayrollPage({ isMobile }) {
   if (!isAdmin) return <div className="card" style={panel}>Payroll is available to administrators.</div>;
 
   const day = state?.day;
-  const locked = state?.saved || busy || loading;
-  const calculated = day ? (state.saved ? day.entries : calculateDailyPayroll(day.entries, day.sources, day.rates)) : [];
-  const issues = day && !state.saved ? payrollIssues(day.entries, day.sources) : [];
+  const locked = !editing || busy || loading;
+  const preview = day ? calculateAutomaticPayroll(day.entries, day.sources, day.rates) : null;
+  const calculated = day ? (!editing && state.saved ? day.entries : preview.entries) : [];
+  const issues = day ? (!editing && state.saved ? day.pendingIssues || [] : preview.pendingIssues) : [];
   const total = calculated.reduce((sum, e) => sum + e.balancePay, 0);
   const staffCosts = day ? calculateStaffCosts(day.date, calculated, day.rates, day.managementFeeApplied) : null;
   const changeEntry = (id, update) => {
@@ -131,10 +139,10 @@ export default function StaffPayrollPage({ isMobile }) {
         await staffService.update(s.id, { name: s.name.trim(), role: s.role, status: s.status, isActive: s.status === 'active', payrollDuties: s.payrollDuties });
       } else {
         const login = s.username.trim().toLowerCase();
-        await staffService.registerNewStaff({ name: s.name.trim(), role: s.role, status: 'active', username: login.split('@')[0], email: login.includes('@') ? login : `${login}@afc.com`, password: s.password, tasks: [] });
+        await staffService.registerNewStaff({ name: s.name.trim(), role: s.role, status: 'active', username: login.split('@')[0], email: login.includes('@') ? login : `${login}@afc.com`, password: s.password, tasks: [], payrollDuties: s.payrollDuties });
       }
       setStaffEditor(null);
-      await load(date, !state?.saved, true);
+      await load(date);
     } catch (e) { setStaffError(e.message); }
     finally { setBusy(false); }
   };
@@ -142,29 +150,31 @@ export default function StaffPayrollPage({ isMobile }) {
   return <div>
     <MonthlyPayrollSummary month={month} isMobile={isMobile} disabled={busy} onMonthChange={value => {
       if (dirty && !window.confirm('Discard unsaved daily changes and change payroll month?')) return;
-      setDirty(false); setMonth(value); setDate(getMalaysiaDate().startsWith(value) ? getMalaysiaDate() : `${value}-01`);
+      setDirty(false); setEditing(false); setMonth(value); setDate(getMalaysiaDate().startsWith(value) ? getMalaysiaDate() : `${value}-01`);
     }} />
     <div className="card" style={{ ...panel, ...row, justifyContent: 'space-between' }}>
       <strong>Daily breakdown</strong>
-      <button className="btn btn-outline" aria-expanded={showDaily} onClick={() => setShowDaily(v => !v)}>{showDaily ? 'Hide daily breakdown' : 'View / prepare a day'}</button>
+      <div style={row}><button className="btn btn-outline" disabled={busy || loading || !state} onClick={() => setRatesOpen(true)}><Settings size={14} /> Wage rates</button>
+      <button className="btn btn-outline" aria-expanded={showDaily} onClick={() => setShowDaily(v => !v)}>{showDaily ? 'Hide daily breakdown' : 'View daily breakdown'}</button></div>
     </div>
     {showDaily && <div className="card" style={{ ...panel, ...row, justifyContent: 'space-between' }}>
       <label style={small}>Payroll date (Malaysia)
         <input className="inp" type="date" aria-label="Payroll date" value={date} disabled={busy || loading} onChange={e => {
           if (!e.target.value || (dirty && !window.confirm('Discard unsaved payroll changes and change date?'))) return;
-          setDirty(false); setDate(e.target.value); setMonth(e.target.value.slice(0, 7));
+          setDirty(false); setEditing(false); setDate(e.target.value); setMonth(e.target.value.slice(0, 7));
         }} />
       </label>
       <div style={row}>
-        <button className="btn btn-outline" disabled={busy || loading} onClick={() => load(date, true, true)}><RefreshCw size={14} />{state?.saved ? 'Recalculate saved day' : 'Refresh sources'}</button>
-        <button className="btn btn-outline" disabled={busy || loading || !state} onClick={() => setRatesOpen(true)}><Settings size={14} /> Wage rates</button>
-        <button className="btn btn-primary" disabled={locked || !day || !day.entries.length || issues.length > 0} onClick={async () => {
+        <button className="btn btn-outline" disabled={busy || loading || editing} onClick={() => load(date)}><RefreshCw size={14} />Refresh view</button>
+        {!editing && <button className="btn btn-outline" disabled={busy || loading || !day} onClick={() => { adjustmentBaseline.current = structuredClone(day); setEditing(true); }}>Adjust duties / advances</button>}
+        {editing && <button className="btn btn-outline" disabled={busy} onClick={() => { setEditing(false); setDirty(false); load(date); }}>Cancel adjustment</button>}
+        {editing && <button className="btn btn-primary" disabled={locked || !dirty || !day || !day.entries.length} onClick={async () => {
           try {
             setBusy(true); setError('');
-            const saved = await savePayrollDay(day);
-            setState(s => ({ ...s, day: saved, saved: true })); setDirty(false); setNotice('Payroll saved. Dashboard payroll totals were updated.');
+            await savePayrollAdjustments(day, adjustmentBaseline.current);
+            setEditing(false); setDirty(false); setNotice('Adjustments saved. Wages and monthly totals update automatically.');
           } catch (e) { setError(e.message); } finally { setBusy(false); }
-        }}><DollarSign size={14} />{busy ? 'Saving…' : 'Save daily payroll'}</button>
+        }}><DollarSign size={14} />{busy ? 'Saving…' : 'Save adjustments'}</button>}
       </div>
     </div>}
     {error && <div role="alert" className="card" style={{ ...panel, color: '#b91c1c' }}>{error} {!state && <button className="btn btn-outline" onClick={() => load(date)}>Retry</button>}</div>}
@@ -172,16 +182,16 @@ export default function StaffPayrollPage({ isMobile }) {
     {showDaily && (loading ? <div style={panel}><Loader2 className="spin" size={20} /> Loading payroll and source records…</div> : day && <>
       <div className="card" style={panel}>
         <div style={{ ...row, justifyContent: 'space-between' }}>
-          <div><strong>{state.saved ? 'Saved payroll' : 'Payroll draft'} · {date}</strong><div style={small}>{state.saved ? 'Saved payroll for this date. Recalculate to review changes.' : 'Select the staff who performed each duty, review the amounts, then save the whole day.'}</div></div>
+          <div><strong>{state.saved ? 'Automatically saved wages' : 'Awaiting automatic calculation'} · {date}</strong><div style={small}>Wages update from assigned duties, attendance, fresh receiving and POS sales. No daily payroll save is required. These are accrued wages, not confirmation of a salary payment.</div></div>
           <strong style={{ fontSize: 24, color: 'var(--primary)' }}>Day balance: {rm(total)}</strong>
         </div>
         <div style={{ ...row, marginTop: 12 }}>
           <span>Received: <b>{day.sources.chickenWhole}</b> whole chickens · <b>{day.sources.carcassKg}</b> kg carcass</span>
           <span>Sold: <b>{day.sources.chickenPieces}</b> chicken pcs = <b>{Math.round(day.sources.chickenPieces / 9)}</b> rounded birds · <b>{day.sources.mushroomSets}</b> mushroom sets</span>
         </div>
-        <p style={small}>Sources: {day.sources.orderCount} completed POS orders · Daily sheet: {day.sources.reportStatus} · Loaded {new Date(day.sources.loadedAt).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}. Refresh after new sales, receiving changes, or clock-outs.</p>
+        <p style={small}>Sources: {day.sources.orderCount} completed POS orders · Daily sheet: {day.sources.reportStatus} · Updated {new Date(day.sources.loadedAt).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}. Updates automatically after saved source changes.</p>
         {new Date(`${date}T00:00:00Z`).getUTCDay() === 6 && <p style={small}>Saturday is normally closed. Duties start unselected; assign only work actually performed.</p>}
-        {!!issues.length && <div role="alert" style={{ ...small, color: '#b91c1c' }}><strong>Resolve before saving:</strong><ul>{issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}
+        {!!issues.length && <div role="status" style={{ ...small, color: '#92400e' }}><strong>Pending wage details:</strong><ul>{issues.map(issue => <li key={issue}>{issue}</li>)}</ul><p>Known wages are saved now. Missing amounts update when the source records are completed.</p></div>}
         {day.sources.reportStatus !== 'submitted' && <p style={small}>This daily sheet is not finalized. Payroll reflects the source quantities shown above; review again after closing.</p>}
       </div>
 
@@ -204,8 +214,8 @@ export default function StaffPayrollPage({ isMobile }) {
           </span>)}
         </div>
         {!state.saved && entry.legacyTotal !== undefined && <p style={{ ...small, color: '#92400e' }}>Previous legacy payroll: {rm(entry.legacyTotal)}. Review duties, bonuses and advances before replacing it with this calculation.</p>}
-        {state.saved && entry.mealCorrectionApplied && <p style={{ ...small, color: '#92400e' }}>Pinjam Makan is shown as an advance deduction. Recalculate and save this day to update its older stored calculation.</p>}
-        {state.saved && entry.managementReclassified > 0 && <p style={{ ...small, color: '#92400e' }}>The previous management amount of {rm(entry.managementReclassified)} is excluded from employee wages. Recalculate and save to update the stored record.</p>}
+        {state.saved && entry.mealCorrectionApplied && <p style={{ ...small, color: '#92400e' }}>Pinjam Makan in this older record is shown as an advance deduction.</p>}
+        {state.saved && entry.managementReclassified > 0 && <p style={{ ...small, color: '#92400e' }}>The previous management amount of {rm(entry.managementReclassified)} is excluded from employee wages.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 1 : 2}, minmax(0, 1fr))`, gap: 8, margin: '12px 0' }}>
           {Object.entries(DUTIES).map(([key, label]) => <label key={key} style={{ ...row, justifyContent: 'space-between', fontSize: 13, padding: 8, background: 'var(--bg)', borderRadius: 6 }}>
             <span><input type="checkbox" checked={Boolean(entry.duties[key])} disabled={locked} onChange={e => changeEntry(entry.staffId, { duties: { ...entry.duties, [key]: e.target.checked } })} /> {label}</span>
@@ -245,7 +255,7 @@ export default function StaffPayrollPage({ isMobile }) {
           <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => openStaff(member)}><Edit2 size={13} /> Profile & defaults</button>
           <button className="btn btn-outline btn-sm" title="Delete staff profile" disabled={busy} onClick={async () => {
             if (!window.confirm(`Remove ${member.name}'s staff profile? Saved payroll will be retained.`)) return;
-            try { setBusy(true); await staffService.delete(member.id); await load(date, !state.saved, true); }
+            try { setBusy(true); await staffService.delete(member.id); await load(date); }
             catch (e) { setError(e.message); } finally { setBusy(false); }
           }}><Trash2 size={13} /></button>
         </div>)}
@@ -254,8 +264,7 @@ export default function StaffPayrollPage({ isMobile }) {
     {ratesOpen && <RatesEditor initial={state?.rates || DEFAULT_PAYROLL_RATES} busy={busy} onClose={() => setRatesOpen(false)} onSave={async rates => {
       try {
         setBusy(true); const saved = await savePayrollRates(rates);
-        setState(s => ({ ...s, rates: saved, day: s.saved ? s.day : { ...s.day, rates: saved } }));
-        if (!state.saved) setDirty(true);
+        setState(s => ({ ...s, rates: saved }));
         setRatesOpen(false); setNotice('Wage rates saved. Existing saved payroll is unchanged.');
       } finally { setBusy(false); }
     }} />}
@@ -264,13 +273,13 @@ export default function StaffPayrollPage({ isMobile }) {
       <label style={small}>Role<select className="inp" value={staffEditor.role} onChange={e => setStaffEditor(s => ({ ...s, role: e.target.value }))}><option>Staff</option><option>Admin</option></select></label>
       {staffEditor.id ? <>
         <label style={small}>Status<select className="inp" value={staffEditor.status} onChange={e => setStaffEditor(s => ({ ...s, status: e.target.value }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-        <p style={small}>Default duties are selected on new days with attendance. Saturdays start with no duties. Admin management fees are separate reporting costs, not staff duties. Current daily selections are edited above.</p>
-        {Object.entries(DUTIES).map(([key, label]) => <label key={key} style={{ display: 'block', margin: '8px 0', fontSize: 13 }}><input type="checkbox" checked={Boolean(staffEditor.payrollDuties[key])} onChange={e => setStaffEditor(s => ({ ...s, payrollDuties: { ...s.payrollDuties, [key]: e.target.checked } }))} /> {label}</label>)}
       </> : <>
         <label style={small}>Username or email<input className="inp" autoComplete="off" value={staffEditor.username} onChange={e => setStaffEditor(s => ({ ...s, username: e.target.value.replace(/\s/g, '') }))} /></label>
         <label style={small}>Password<input className="inp" type="password" autoComplete="new-password" value={staffEditor.password} onChange={e => setStaffEditor(s => ({ ...s, password: e.target.value }))} /></label>
         <label style={small}>Confirm password<input className="inp" type="password" autoComplete="new-password" value={staffEditor.confirmPassword} onChange={e => setStaffEditor(s => ({ ...s, confirmPassword: e.target.value }))} /></label>
       </>}
+      <p style={small}>Configure the worker's regular duties once. Attendance activates them automatically on trading days. Changes apply to today's automatic duties and future days; date-specific adjustments take priority. Saturdays start unassigned. Management is a separate reporting cost.</p>
+      {Object.entries(DUTIES).map(([key, label]) => <label key={key} style={{ display: 'block', margin: '8px 0', fontSize: 13 }}><input type="checkbox" checked={Boolean(staffEditor.payrollDuties[key])} onChange={e => setStaffEditor(s => ({ ...s, payrollDuties: { ...s.payrollDuties, [key]: e.target.checked } }))} /> {label}</label>)}
       {staffError && <p role="alert" style={{ color: '#b91c1c' }}>{staffError}</p>}
       <button className="btn btn-primary" style={{ marginTop: 14 }} disabled={busy} onClick={saveStaff}>{busy ? 'Saving…' : 'Save staff'}</button>
     </Modal>}

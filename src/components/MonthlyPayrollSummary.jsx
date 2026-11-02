@@ -14,17 +14,18 @@ export function MonthlyPayrollView({ summary, isMobile }) {
         <div style={{ fontSize: 12 }}>{label}</div><strong style={{ fontSize: 24, color: 'var(--primary)' }}>{rm(amount)}</strong>
       </div>)}
     </div>
-    <p style={{ fontSize: 12 }}>Totals update automatically from saved daily payroll: {summary.dates.length} saved dates in this month. Unsaved days and draft edits are excluded.</p>
+    <p style={{ fontSize: 12 }}>Wages calculate and save automatically from recorded work: {summary.dates.length} dates in this month. No daily payroll save is required.</p>
+    {summary.pendingDates?.length > 0 && <p role="status" style={{ fontSize: 12, color: '#92400e' }}>Provisional total: {summary.pendingDates.length} day(s) have pending wage details ({summary.pendingDates.join(', ')}). Known amounts are included; open a daily breakdown for details.</p>}
     <p style={{ fontSize: 12 }}>Month-end payout = wages earned (including bonuses) − Pinjam Makan − other cash advances − penalties. Pinjam Makan is salary already paid in advance.</p>
-    {summary.correctedRecords > 0 && <p style={{ fontSize: 12, color: '#92400e' }}>Pinjam Makan has been corrected from an allowance to an advance for {summary.correctedRecords} older records in this view. Their stored records are unchanged until the day is recalculated and saved.</p>}
-    {summary.managementCorrections > 0 && <p style={{ fontSize: 12, color: '#92400e' }}>Management fees in {summary.managementCorrections} older records have been excluded from employee wages in this view. Recalculate and save the affected days to update their stored records.</p>}
+    {summary.correctedRecords > 0 && <p style={{ fontSize: 12, color: '#92400e' }}>Pinjam Makan has been corrected from an allowance to an advance for {summary.correctedRecords} older records in this view.</p>}
+    {summary.managementCorrections > 0 && <p style={{ fontSize: 12, color: '#92400e' }}>Management fees in {summary.managementCorrections} older records have been excluded from employee wages.</p>}
     {summary.entries.length ? <div style={{ overflowX: 'auto' }}><table className="data-table">
       <thead><tr><th>Staff</th><th>Wages earned</th><th>Pinjam Makan</th><th>Other advances</th><th>Penalties</th><th>Remaining payout</th></tr></thead>
       <tbody>{summary.entries.map(entry => <tr key={entry.staffId}>
         <td>{entry.staffName}</td><td>{rm(entry.grossPay)}</td><td>{rm(entry.mealAdvance)}</td><td>{rm(entry.cashAdvance)}</td><td>{rm(entry.friedDeduction)}</td><td><strong>{rm(entry.totalPay)}</strong>{entry.excessAdvance > 0 && <div style={{ fontSize: 11, color: '#92400e' }}>Deductions exceed earnings by {rm(entry.excessAdvance)}</div>}</td>
       </tr>)}</tbody>
       <tfoot><tr><th>Total</th><th>{rm(summary.grossPay)}</th><th>{rm(summary.mealAdvance)}</th><th>{rm(summary.cashAdvance)}</th><th>{rm(summary.friedDeduction)}</th><th>{rm(summary.totalPay)}</th></tr></tfoot>
-    </table></div> : <p>No saved payroll for this month. Open the daily breakdown to prepare and save a day.</p>}
+    </table></div> : <p>No recorded wages for this month yet. Attendance and configured staff duties feed payroll automatically.</p>}
     <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
       <strong>StaffCosts reporting</strong>
       <p style={{ fontSize: 13 }}>Employee wages {rm(summary.grossPay)} + admin management fees {rm(summary.managementFee)} = <strong>{rm(summary.totalStaffCosts)}</strong></p>

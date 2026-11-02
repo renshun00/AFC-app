@@ -24,13 +24,13 @@ export default function StallOpeningSection({ data, previousDate, hasPreviousDay
             {!hasPreviousDay && <div>No report for {previousDate}. Available inventory is used as carryover.</div>}
           </>}
           {isSubmitted && <div>Submitted quantities are preserved.{!opening && ' This older report has no saved carryover breakdown.'}</div>}
-          <div>Chicken and carcass receipts come from Raw Materials. Neck pieces are grouped into sets of four. Enter new mushroom, rice and sauce stock below.</div>
+          <div>Chicken and carcass receipts come from Raw Materials. Neck pieces are grouped into sets of four. Enter new mushroom and sauce stock below.</div>
         </div>
         {inventoryWarnings.map(message => <div key={message} role="status" style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>{message}</div>)}
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table" style={{ width: '100%', minWidth: 470 }}>
             <thead><tr><th>Item</th><th>Carryover</th><th>Received today</th><th>Brought to stall</th></tr></thead>
-            <tbody>{STALL_ITEMS.map(item => {
+            <tbody>{STALL_ITEMS.filter(item => item.key !== 'butter_rice').map(item => {
               const carry = opening?.carryover?.[item.key];
               const received = opening?.received?.[item.key];
               const isNeck = item.key === 'chicken_neck_set';

@@ -44,7 +44,7 @@
 import {
   collection, doc,
   addDoc, setDoc, updateDoc, deleteDoc,
-  getDoc, getDocs,
+  getDoc, getDocs, getDocsFromServer,
   query, where, orderBy, limit,
   serverTimestamp, Timestamp, runTransaction,
 } from 'firebase/firestore';
@@ -462,7 +462,7 @@ export const staffShiftService = {
       where('clockOut', '==', null),
       limit(1),
     );
-    const snap = await getDocs(q);
+    const snap = await getDocsFromServer(q);
     return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
   },
 
@@ -493,9 +493,9 @@ export const staffShiftService = {
 
   /** Get most recent shift for a staff today (by date YYYY-MM-DD or start of day) */
   getTodayShift: async (staffId, dateStr) => {
-    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
-    const startOfDay = new Date(`${targetDate}T00:00:00`);
-    const endOfDay = new Date(`${targetDate}T23:59:59.999`);
+    const targetDate = dateStr || getMalaysiaDate();
+    const startOfDay = new Date(`${targetDate}T00:00:00+08:00`);
+    const endOfDay = new Date(`${targetDate}T23:59:59.999+08:00`);
     const q = query(
       col('staff_shifts'),
       where('staffId', '==', staffId),
@@ -504,7 +504,7 @@ export const staffShiftService = {
       orderBy('clockIn', 'desc'),
       limit(1)
     );
-    const snap = await getDocs(q);
+    const snap = await getDocsFromServer(q);
     return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
   },
 
@@ -1168,7 +1168,7 @@ export const staffService = {
    * Creates an account in Firebase Auth without logging out the current admin,
    * then writes the staff record to Firestore using the new Auth UID.
    */
-  registerNewStaff: async ({ email, password, name, role, username, tasks, status }) => {
+  registerNewStaff: async ({ email, password, name, role, username, tasks, status, payrollDuties }) => {
     const secondaryAppName = 'SecondaryAuthApp';
     const secondaryApp = getApps().find(a => a.name === secondaryAppName)
       || initializeApp(db.app.options, secondaryAppName);
@@ -1191,6 +1191,7 @@ export const staffService = {
       status: status || 'active',
       password, // retained for in-app credential view
       tasks: tasks || [],
+      ...(payrollDuties ? { payrollDuties } : {}),
       isActive: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
