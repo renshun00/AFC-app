@@ -1,13 +1,12 @@
 import { db, auth } from '../firebase';
-import { getMalaysiaDate } from '../utils/dailyFlowCalculator.js';
-import { calculateAutomaticPayroll, payrollFingerprint } from '../utils/automaticPayroll.js';
+import { buildPayrollDay, calculateAutomaticPayroll, payrollFingerprint } from '../utils/automaticPayroll.js';
 import {
   collection, doc, getDocFromServer, getDocsFromServer, query, where,
   Timestamp, runTransaction, setDoc, onSnapshot,
 } from 'firebase/firestore';
 import {
-  DEFAULT_PAYROLL_RATES, validateRates, aggregatePayrollSales, attendanceForDay,
-  receivingForPayroll, newPayrollEntry, restoreLegacyPayroll, normalizeSavedPayroll, summarizeMonthlyPayroll, calculateStaffCosts, dutiesFromProfile,
+  DEFAULT_PAYROLL_RATES, validateRates, aggregatePayrollSales,
+  receivingForPayroll, normalizeSavedPayroll, summarizeMonthlyPayroll, calculateStaffCosts, dutiesFromProfile,
 } from '../utils/payrollCalculator.js';
 
 export { calculateJagaGeraiPay, calculateOTPay, calculateStaffDailyPay } from '../utils/payrollCalculator.js';
@@ -84,26 +83,7 @@ export async function loadPayrollDay(date, refresh = false, automatic = false) {
     return { staff, rates, day: { ...saved, entries, managementFeeApplied: saved.managementFeeApplied ?? new Date(`${date}T00:00:00Z`).getUTCDay() !== 6, staffCosts: calculateStaffCosts(date, entries, saved.rates, saved.managementFeeApplied) }, saved: true };
   }
   const { sources, shifts } = await loadPayrollSources(date);
-  const previous = saved?.entries || documents(legacySnap);
-  const members = [...staff];
-  for (const record of previous) {
-    if (!members.some(s => s.id === record.staffId)) members.push({ id: record.staffId, name: record.staffName, status: 'inactive' });
-  }
-  const entries = members.map(member => {
-    const attendance = attendanceForDay(shifts.filter(s => s.staffId === member.id), date);
-    const prior = previous.find(e => e.staffId === member.id);
-    const entry = newPayrollEntry(member, attendance, date);
-    if (prior?.duties) return { ...entry, duties: automatic && saved?.automatic && member.isActive !== false && member.status !== 'inactive' && (date >= getMalaysiaDate() || !prior.attendance?.present)
-      ? entry.duties : dutiesFromProfile({ payrollDuties: prior.duties }), bonus: prior.bonus || 0, cashAdvance: prior.cashAdvance || 0, mealClaims: prior.mealClaims || 0, note: prior.note || '' };
-    // Legacy totals remain visible for comparison; admins review the new draft.
-    if (prior) return restoreLegacyPayroll(entry, prior);
-    return entry;
-  });
-  const adjusted = entries.map(entry => ({ ...entry, ...(adjustments?.entries?.[entry.staffId] || {}) }));
-  return { staff, rates, saved: false, day: { date, revision: saved?.revision || 0,
-    rates: automatic ? saved?.rates || rates : rates, sources, entries: adjusted,
-    adjustmentRevision: adjustments?.revision || 0,
-    managementFeeApplied: adjustments?.managementFeeApplied ?? saved?.managementFeeApplied ?? new Date(`${date}T00:00:00Z`).getUTCDay() !== 6 } };
+  return { staff, rates, saved: false, day: buildPayrollDay({ date, staff, saved, legacy: documents(legacySnap), shifts, sources, rates, adjustments, automatic }) };
 }
 
 export function subscribePayrollDay(date, onChange, onError) {

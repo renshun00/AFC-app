@@ -13,7 +13,9 @@ export function reportingQueries(from, to) {
   // in the calculator; timestamp queries also include legacy undated documents.
   return { ordersByDate: byDate('sales_orders'), ordersByTime: byTime('sales_orders'), reports: byDate('daily_inventory'),
     payrollDays: byDate('payroll_days'), payroll: byDate('daily_payroll'), expensesByDate: byDate('expenses'), expensesByTime: byTime('expenses'),
-    overhead: collection(db, 'reporting_cost_rates') };
+    overhead: collection(db, 'reporting_cost_rates'), staff: collection(db, 'staff'),
+    shifts: query(collection(db, 'staff_shifts'), where('clockIn', '>=', start), where('clockIn', '<=', end)),
+    payrollAdjustments: byDate('payroll_adjustments'), payrollSettings: doc(db, 'settings', 'payroll') };
 }
 
 export function subscribeReporting(from, to, onData, onError) {
@@ -25,7 +27,8 @@ export function subscribeReporting(from, to, onData, onError) {
     for (const [key, ref] of Object.entries(sources)) {
       unsubs.push(onSnapshot(ref, { includeMetadataChanges: true }, snapshot => {
         if (stopped) return;
-        values[key] = documents(snapshot); cached[key] = snapshot.metadata?.fromCache === true; ready.add(key);
+        values[key] = key === 'payrollSettings' ? (snapshot.exists() ? snapshot.data() : {}) : documents(snapshot);
+        cached[key] = snapshot.metadata?.fromCache === true; ready.add(key);
         if (ready.size === Object.keys(sources).length) onData({ ...values,
           orders: merge(values.ordersByTime, values.ordersByDate), expenses: merge(values.expensesByTime, values.expensesByDate), fromCache: Object.values(cached).some(Boolean) });
       }, error => { if (!stopped) { stop(); onError(new Error(`Unable to load ${key.replace(/ByDate|ByTime/g, '')}: ${error.message}`)); } }));

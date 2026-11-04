@@ -1,5 +1,6 @@
 import { getMalaysiaDate, shiftDate } from './dailyFlowCalculator.js';
-import { calculateStaffCosts, DEFAULT_PAYROLL_RATES, normalizeSavedPayroll } from './payrollCalculator.js';
+import { calculateStaffCosts, DEFAULT_PAYROLL_RATES, normalizeSavedPayroll, aggregatePayrollSales, receivingForPayroll, validateRates } from './payrollCalculator.js';
+import { buildPayrollDay, calculateAutomaticPayroll } from './automaticPayroll.js';
 
 export const money = value => Math.round((Number(value) || 0) * 100) / 100;
 const n = value => Math.max(0, Number(value) || 0);
@@ -124,7 +125,7 @@ export function calculateReportCos(sold, waste = {}, raw = {}) {
   return { total: money(breakdown.reduce((sum, row) => sum + row.value, 0)), breakdown, chickenKg: chicken * .237, carcassKg: carcass * .443 };
 }
 
-export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], reports = [], payrollDays = [], payroll = [], expenses = [], overhead = [], fromCache = false }) {
+export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], reports = [], payrollDays = [], payroll = [], expenses = [], overhead = [], fromCache = false, staff, shifts, payrollSettings, payrollAdjustments }) {
   validatePeriod(from, to);
   const uniqueOrders = [...new Map(orders.map(o => [o.id, o])).values()].filter(o => businessDate(o) >= from && businessDate(o) <= to && businessDate(o) <= today && o.status === 'completed');
   const reportMap = new Map(reports.map(r => [r.date || r.id, r]));
@@ -133,14 +134,25 @@ export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], 
   const coveredCategories = new Set(['rent', 'rental', 'utilities', 'wifi', 'wi-fi', 'royalty', 'payroll', 'wages', 'staff', 'management', 'packaging', 'ingredients', 'oil', 'ice']);
   for (let date = from; date <= to; date = shiftDate(date, 1)) {
     const sales = aggregateReportSales(uniqueOrders.filter(o => businessDate(o) === date));
-    const report = reportMap.get(date), payrollDay = payrollMap.get(date);
+    const report = reportMap.get(date), savedPayrollDay = payrollMap.get(date);
+    let payrollDay = savedPayrollDay;
     const legacy = [...new Map(payroll.filter(p => p.date === date).map(p => [p.staffId, p])).values()];
     const future = date > today;
-    const active = !future && Boolean(sales.count || report || payrollDay || legacy.length);
+    const dayShifts = (shifts || []).filter(shift => shift.clockIn && getMalaysiaDate(shift.clockIn.toDate ? shift.clockIn.toDate() : new Date(shift.clockIn)) === date);
+    const active = !future && Boolean(sales.count || report || payrollDay || legacy.length || dayShifts.length);
     const issues = [...sales.issues];
+    const livePayrollReady = Array.isArray(staff) && Array.isArray(shifts) && payrollSettings !== undefined && Array.isArray(payrollAdjustments);
+    if (active && livePayrollReady && (sales.count || report || dayShifts.length)) {
+      try {
+        const inputs = buildPayrollDay({ date, today, staff, shifts: dayShifts, saved: savedPayrollDay, legacy,
+          sources: { ...aggregatePayrollSales(uniqueOrders, date), ...receivingForPayroll(report) },
+          rates: validateRates({ ...DEFAULT_PAYROLL_RATES, ...payrollSettings.rates }),
+          adjustments: payrollAdjustments.find(record => (record.date || record.id) === date) });
+        payrollDay = { ...inputs, ...calculateAutomaticPayroll(inputs.entries, inputs.sources, inputs.rates) };
+      } catch (error) { issues.push(`Payroll source error: ${error.message}`); }
+    }
     if (active && report?.status !== 'submitted') issues.push(report ? 'Closing report is a draft' : 'Closing report missing');
-    if (active && !payrollDay && !legacy.length) issues.push('Payroll not saved');
-    if (payrollDay?.calculationStatus === 'pending') issues.push(...(payrollDay.pendingIssues || ['Payroll calculation pending']));
+    if (active && !payrollDay && !legacy.length) issues.push('Waiting for automatic payroll sources');
     if (active && !sales.count && SOLD_ITEMS.some(item => {
       const key = item.key === 'neck' ? 'chicken_neck_set' : item.key;
       const remaining = report?.data?.remaining_unfried?.[item.key] ?? report?.data?.other_remaining?.[item.key];
@@ -163,10 +175,14 @@ export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], 
     const overheadCost = future ? 0 : money(Object.values(overheadRates).reduce((sum, v) => sum + n(v), 0));
     const costOfSales = active && !sales.issues.length && report?.status === 'submitted' ? cos.total : active ? null : 0;
     const savedStaffCost = active && !payrollDay && !legacy.length ? null : staffCosts.totalStaffCosts;
+    const canEstimate = issues.length === 0;
+    const payrollPending = payrollDay?.calculationStatus === 'pending';
+    if (payrollPending) issues.push(...(payrollDay.pendingIssues?.length ? payrollDay.pendingIssues : ['Payroll calculation pending']));
     const complete = issues.length === 0;
-    const totalCost = !complete || costOfSales == null || savedStaffCost == null ? null : money(costOfSales + savedStaffCost + overheadCost + extraExpenses);
-    const netGain = complete && totalCost != null ? money(sales.revenue - totalCost) : null;
-    daily.push({ date, ...sales, active, future, issues, complete, closingStatus: report?.status || 'missing', payrollSaved: Boolean(payrollDay || legacy.length),
+    const totalCost = !canEstimate || costOfSales == null || savedStaffCost == null ? null : money(costOfSales + savedStaffCost + overheadCost + extraExpenses);
+    const netGain = totalCost != null ? money(sales.revenue - totalCost) : null;
+    daily.push({ date, ...sales, active, future, issues, complete, provisional: payrollPending && netGain != null,
+      closingStatus: report?.status || 'missing', payrollSaved: Boolean(savedPayrollDay || legacy.length), payrollAvailable: Boolean(payrollDay || legacy.length), payrollPending,
       costOfSales, employeeWages: staffCosts.employeeWages, managementFee: staffCosts.managementFee, staffCosts: savedStaffCost,
       overhead: overheadCost, overheadRates, extraExpenses, excludedExpenses, totalCost, netGain,
       margin: netGain != null && sales.revenue ? netGain / sales.revenue * 100 : null,
@@ -180,7 +196,8 @@ export function buildReport({ from, to, today = getMalaysiaDate(), orders = [], 
   const totals = Object.fromEntries(['revenue', 'costOfSales', 'employeeWages', 'managementFee', 'staffCosts', 'overhead', 'extraExpenses', 'excludedExpenses', 'netGain'].map(key => [key, sum(key)]));
   if (daily.some(d => d.costOfSales == null)) totals.costOfSales = null;
   if (daily.some(d => d.staffCosts == null)) totals.staffCosts = null;
-  if (pending.length) totals.netGain = null;
+  if (daily.some(day => day.netGain == null)) totals.netGain = null;
+  totals.provisional = daily.some(day => day.provisional);
   totals.margin = totals.netGain != null && totals.revenue ? totals.netGain / totals.revenue * 100 : null;
   const breakdown = new Map();
   daily.forEach(d => d.costBreakdown.forEach(b => breakdown.set(b.name, money((breakdown.get(b.name) || 0) + b.value))));
@@ -195,8 +212,8 @@ export function reportCsv(report, section = 'daily') {
   if (section === 'menu') rows = [['Item', 'Quantity', 'Net sales (RM)'], ...report.menu.map(r => [r.name, r.quantity, r.revenue])];
   else if (section === 'waste') rows = [['Date', 'Chicken (pcs)', 'Carcass (pcs)', 'Neck (sets)', 'Mushroom (sets)', 'Closing status'], ...report.daily.map(r => [r.date, r.waste.chicken_pcs, r.waste.carcass_pcs, r.waste.neck, r.waste.mushroom, r.closingStatus])];
   else rows = [['Date', 'POS sales (RM)', 'Orders', 'Estimated CoS (RM)', 'Employee wages (RM)', 'Management (RM)', 'StaffCosts (RM)', 'Rent (RM)', 'Utilities (RM)', 'Wi-Fi (RM)', 'Other expenses (RM)', 'Estimated net gain (RM)', 'Status'],
-    ...report.daily.map(r => [r.date, r.revenue, r.count, r.costOfSales, r.payrollSaved ? r.employeeWages : r.active ? null : 0, r.payrollSaved ? r.managementFee : r.active ? null : 0, r.staffCosts,
-      r.future ? 0 : r.overheadRates.rent, r.future ? 0 : r.overheadRates.utilities, r.future ? 0 : r.overheadRates.wifi, r.extraExpenses, r.netGain, r.future ? 'Future' : r.issues.join('; ') || (r.active ? 'Complete (estimated CoS)' : 'No trading records; overhead only')])];
+    ...report.daily.map(r => [r.date, r.revenue, r.count, r.costOfSales, r.payrollAvailable ? r.employeeWages : r.active ? null : 0, r.payrollAvailable ? r.managementFee : r.active ? null : 0, r.staffCosts,
+      r.future ? 0 : r.overheadRates.rent, r.future ? 0 : r.overheadRates.utilities, r.future ? 0 : r.overheadRates.wifi, r.extraExpenses, r.netGain, r.future ? 'Future' : r.provisional ? `Provisional: ${r.issues.join('; ')}` : r.issues.join('; ') || (r.active ? 'Complete (estimated CoS)' : 'No trading records; overhead only')])];
   const escape = value => { const text = value == null ? '' : String(value); return '"' + (/^[=+@\-\t\r]/.test(text) && typeof value !== 'number' ? "'" : '') + text.replace(/"/g, '""') + '"'; };
   return '\uFEFF' + rows.map(row => row.map(escape).join(',')).join('\r\n');
 }

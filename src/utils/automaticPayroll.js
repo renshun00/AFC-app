@@ -1,4 +1,27 @@
-import { calculateDailyPayroll, payrollIssues } from './payrollCalculator.js';
+import { calculateDailyPayroll, payrollIssues, attendanceForDay, newPayrollEntry, dutiesFromProfile, restoreLegacyPayroll } from './payrollCalculator.js';
+import { getMalaysiaDate } from './dailyFlowCalculator.js';
+
+// Shared by automatic persistence and live reporting so neither needs an
+// administrator to prepare a day before wages can be included.
+export function buildPayrollDay({ date, staff, saved, legacy = [], shifts, sources, rates, adjustments, automatic = true, today = getMalaysiaDate() }) {
+  const previous = saved?.entries || legacy;
+  const members = [...staff];
+  for (const record of previous) {
+    if (!members.some(s => s.id === record.staffId)) members.push({ id: record.staffId, name: record.staffName, status: 'inactive' });
+  }
+  const entries = members.map(member => {
+    const attendance = attendanceForDay(shifts.filter(s => s.staffId === member.id), date);
+    const prior = previous.find(e => e.staffId === member.id);
+    const entry = newPayrollEntry(member, attendance, date);
+    if (prior?.duties) return { ...entry, duties: automatic && saved?.automatic && member.isActive !== false && member.status !== 'inactive' && (date >= today || !prior.attendance?.present)
+      ? entry.duties : dutiesFromProfile({ payrollDuties: prior.duties }), bonus: prior.bonus || 0, cashAdvance: prior.cashAdvance || 0, mealClaims: prior.mealClaims || 0, note: prior.note || '' };
+    return prior ? restoreLegacyPayroll(entry, prior) : entry;
+  });
+  return { date, revision: saved?.revision || 0, rates: automatic ? saved?.rates || rates : rates, sources,
+    entries: entries.map(entry => ({ ...entry, ...(adjustments?.entries?.[entry.staffId] || {}) })),
+    adjustmentRevision: adjustments?.revision || 0,
+    managementFeeApplied: adjustments?.managementFeeApplied ?? saved?.managementFeeApplied ?? new Date(`${date}T00:00:00Z`).getUTCDay() !== 6 };
+}
 
 // Save earned amounts throughout the day, but never guess a missing quantity or
 // apply a draft closing penalty. Original assignments remain visible for review.

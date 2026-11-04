@@ -205,8 +205,12 @@ export default function StaffPayrollPage({ isMobile }) {
         <p style={small}>This fee is recorded once for management reporting. It is excluded from every employee's wages and payout. StaffCosts uses earned wages before salary advances are deducted.</p>
       </section>
 
-      {calculated.map(entry => <div className="card" key={entry.staffId} style={panel}>
-        <div style={{ ...row, justifyContent: 'space-between' }}><strong>{entry.staffName}</strong><strong style={{ color: 'var(--primary)' }}>{rm(entry.balancePay)}</strong></div>
+      {calculated.map(entry => <details className="card" key={`${date}_${entry.staffId}`} style={panel}>
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+          {entry.staffName} <span style={{ color: 'var(--primary)', marginLeft: 12 }}>{rm(entry.balancePay)}</span>
+          <span style={{ ...small, marginLeft: 12 }}>{Object.values(entry.duties).filter(Boolean).length} active duties · View pay breakdown</span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
         <div style={small}>
           {entry.attendance.present ? `${entry.workedMinutes} worked minutes · ${entry.otMinutes} OT minutes${entry.attendance.pending ? ' · Clock-out pending' : ''}` : 'No recorded shift. OT is zero; assign other verified duties manually.'}
           {entry.attendance.shifts.map(shift => <span key={shift.id} style={{ display: 'block' }}>
@@ -218,7 +222,7 @@ export default function StaffPayrollPage({ isMobile }) {
         {state.saved && entry.managementReclassified > 0 && <p style={{ ...small, color: '#92400e' }}>The previous management amount of {rm(entry.managementReclassified)} is excluded from employee wages.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 1 : 2}, minmax(0, 1fr))`, gap: 8, margin: '12px 0' }}>
           {Object.entries(DUTIES).map(([key, label]) => <label key={key} style={{ ...row, justifyContent: 'space-between', fontSize: 13, padding: 8, background: 'var(--bg)', borderRadius: 6 }}>
-            <span><input type="checkbox" checked={Boolean(entry.duties[key])} disabled={locked} onChange={e => changeEntry(entry.staffId, { duties: { ...entry.duties, [key]: e.target.checked } })} /> {label}</span>
+            <span><input type="checkbox" aria-label={`${entry.staffName}: ${label}`} checked={Boolean(entry.duties[key])} disabled={locked} onChange={e => changeEntry(entry.staffId, { duties: { ...entry.duties, [key]: e.target.checked } })} /> {label} <span style={{ ...small, color: entry.duties[key] ? '#15803d' : 'var(--text-3)' }}>{entry.duties[key] ? 'Active' : 'Inactive'}</span></span>
             <strong>{key === 'friedPenalty' ? `−${rm(entry.friedDeduction)}` : rm(entry.breakdown[key])}</strong>
           </label>)}
         </div>
@@ -229,7 +233,8 @@ export default function StaffPayrollPage({ isMobile }) {
         </div>
         <input className="inp" aria-label={`${entry.staffName}: payroll note`} placeholder="Payroll note (optional)" value={entry.note} disabled={locked} style={{ marginTop: 8 }} onChange={e => changeEntry(entry.staffId, { note: e.target.value })} />
         <div style={{ ...small, marginTop: 8 }}>Earned {rm(entry.grossPay)} − Pinjam Makan {rm(entry.mealAdvance)} − other advances {rm(entry.cashAdvance)} − penalties {rm(entry.friedDeduction)} = <strong>{rm(entry.balancePay)}</strong> toward the month-end balance.</div>
-      </div>)}
+        </div>
+      </details>)}
       {!calculated.length && <div className="card" style={panel}>Add staff to start preparing payroll.</div>}
 
       <details className="card" style={panel}><summary style={{ cursor: 'pointer', fontWeight: 600 }}>How payroll works</summary>
@@ -244,7 +249,7 @@ export default function StaffPayrollPage({ isMobile }) {
         <div style={{ overflowX: 'auto' }}><table className="data-table"><thead><tr><th>Rounded whole birds</th><th>Carcass reference (kg)</th><th>Operation wage</th></tr></thead><tbody>
           {day.rates.tiers.map((tier, i) => <tr key={i}><td>{i ? Number(day.rates.tiers[i - 1].maxBirds) + 1 : 0}–{tier.maxBirds}{i === 9 ? '+' : ''}</td><td>{tier.carcassKg}</td><td>{rm(tier.pay)}</td></tr>)}
         </tbody></table></div>
-        <p style={small}>G1 uses chicken sales alone for the operation tier. Carcass weights above are reference values. Saved payroll is a reviewed snapshot; it is not automatically changed by later POS activity.</p>
+        <p style={small}>G1 uses chicken sales alone for the operation tier. Carcass weights above are reference values. Wages and duty ticks update automatically from recorded work and attendance; date-specific adjustments take priority. Saved rates remain fixed for that day.</p>
       </details>
     </>)}
       {!loading && state && <div className="card" style={panel}>
